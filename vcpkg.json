@@ -1,0 +1,9 @@
+{
+    "name": "rundb",
+    "version": "0.1.0",
+    "description": "Redis-inspired in-memory database written in C++",
+
+    "dependencies": [
+        "quill"
+    ]
+}

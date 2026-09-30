@@ -1,0 +1,22 @@
+services:
+  rundb:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rundb-server
+    ports:
+      - "7379:7379"
+    restart: unless-stopped
+    volumes:
+      - rundb_data:/data
+    environment:
+      - RUNDB_PORT=7379
+      - RUNDB_HOST=0.0.0.0
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  rundb_data:
+    name: rundb_data

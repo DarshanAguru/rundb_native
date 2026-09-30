@@ -1,0 +1,98 @@
+# ==============================================================================
+# RunDB Native .gitignore
+# ==============================================================================
+
+# Build & Compilation Artifacts
+build/
+build-*/
+cmake-build-*/
+out/
+bin/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CMakeUserPresets.json
+CTestTestfile.cmake
+Makefile
+*.ninja
+.ninja_deps
+.ninja_log
+compile_commands.json
+compile_flags.txt
+
+# Object files and libraries
+*.o
+*.obj
+*.a
+*.lib
+*.dylib
+*.dll
+*.exe
+*.so
+# Ensure bundled jemalloc is retained
+!lib/libjemalloc.so
+
+# Dependency management (vcpkg)
+.vcpkg/
+vcpkg_installed/
+vcpkg-manifest-install.log
+
+# Compiler, Debugger & Profiling outputs
+*.d
+*.gch
+*.pch
+*.dSYM/
+core
+core.*
+vgcore.*
+*.stackdump
+gmon.out
+*.gcda
+*.gcno
+*.gcov
+default.profraw
+prof.data
+
+# Persistence, Runtime Data & Logs
+*.log
+*.aof
+*.rdb
+appendonly.aof*
+data/
+*.pid
+rundb.pid
+
+# Python & Testing artifacts (scripts/ & tests/)
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+env/
+
+# IDE & Editor configurations
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.clangd/
+.cache/
+
+# OS-generated files
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
+
+# Environment variables & secrets
+.env
+.env.*
+!.env.example

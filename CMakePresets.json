@@ -1,0 +1,43 @@
+{
+  "version": 6,
+
+  "configurePresets": [
+    {
+      "name": "default",
+      "displayName": "RunDB Debug",
+      "generator": "Ninja",
+
+      "binaryDir": "${sourceDir}/build",
+
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+      }
+    },
+
+    {
+      "name": "release",
+      "displayName": "RunDB Release",
+      "generator": "Ninja",
+
+      "binaryDir": "${sourceDir}/build/release",
+
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+      }
+    }
+  ],
+
+  "buildPresets": [
+    {
+      "name": "build-debug",
+      "configurePreset": "default"
+    },
+
+    {
+      "name": "build-release",
+      "configurePreset": "release"
+    }
+  ]
+}
