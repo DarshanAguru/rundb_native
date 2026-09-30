@@ -19,6 +19,7 @@ public:
     static void setup_signals();
     static bool is_shutdown_requested() noexcept;
     static void request_shutdown(int sig = 0) noexcept;
+    static void reset() noexcept;
     static int get_signal() noexcept;
 
     static void set_engine_status(EngineStatus status) noexcept;

@@ -24,6 +24,12 @@ void Shutdown::request_shutdown(int sig) noexcept {
     s_shutdown_requested.store(true, std::memory_order_release);
 }
 
+void Shutdown::reset() noexcept {
+    s_signal_received.store(0, std::memory_order_relaxed);
+    s_engine_status.store(EngineStatus::Idle, std::memory_order_relaxed);
+    s_shutdown_requested.store(false, std::memory_order_release);
+}
+
 int Shutdown::get_signal() noexcept {
     return s_signal_received.load(std::memory_order_relaxed);
 }

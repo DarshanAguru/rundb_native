@@ -24,6 +24,10 @@ if(ipo_supported)
     set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
 endif()
 
+# Global RPATH configuration so executables find bundled shared libraries
+set(CMAKE_BUILD_RPATH "\$ORIGIN;\$ORIGIN/../lib;${PROJECT_SOURCE_DIR}/lib")
+set(CMAKE_INSTALL_RPATH "\$ORIGIN;\$ORIGIN/../lib")
+
 # --------------------------------------------------
 # Dependencies
 # --------------------------------------------------
@@ -31,11 +35,10 @@ endif()
 find_package(quill CONFIG REQUIRED)
 
 # --------------------------------------------------
-# RunDB Executable Target
+# Core Library Target (Reusable by Server, Tests, Benchmarks)
 # --------------------------------------------------
 
-add_executable(rundb
-    src/main.cpp
+add_library(rundb_core STATIC
     src/logger.cpp
     src/config.cpp
     src/syscheck.cpp
@@ -61,21 +64,13 @@ add_executable(rundb
     src/util/printer.cpp
 )
 
-# --------------------------------------------------
-# Include Directories
-# --------------------------------------------------
-
-target_include_directories(rundb
-    PRIVATE
+target_include_directories(rundb_core
+    PUBLIC
         ${PROJECT_SOURCE_DIR}/include
 )
 
-# --------------------------------------------------
-# Linked Libraries & Bundled jemalloc
-# --------------------------------------------------
-
-target_link_libraries(rundb
-    PRIVATE
+target_link_libraries(rundb_core
+    PUBLIC
         quill::quill
 )
 
@@ -89,23 +84,8 @@ if(EXISTS "${BUNDLED_JEMALLOC}")
         IMPORTED_LOCATION "${BUNDLED_JEMALLOC}"
     )
 
-    target_link_libraries(rundb PRIVATE bundled_jemalloc)
-    target_compile_definitions(rundb PRIVATE RUNDB_USE_JEMALLOC=1)
-
-    # Set RPATH so the runtime dynamic loader always finds libjemalloc.so
-    # next to the executable ($ORIGIN) or in the source lib directory
-    set_target_properties(rundb PROPERTIES
-        BUILD_RPATH "\$ORIGIN;\$ORIGIN/../lib;${PROJECT_SOURCE_DIR}/lib"
-        INSTALL_RPATH "\$ORIGIN;\$ORIGIN/../lib"
-    )
-
-    # Copy libjemalloc.so next to the target executable upon successful build
-    add_custom_command(TARGET rundb POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${BUNDLED_JEMALLOC}"
-            "$<TARGET_FILE_DIR:rundb>/libjemalloc.so"
-        COMMENT "Copying bundled libjemalloc.so to output directory"
-    )
+    target_link_libraries(rundb_core PUBLIC bundled_jemalloc)
+    target_compile_definitions(rundb_core PUBLIC RUNDB_USE_JEMALLOC=1)
 
     install(
         FILES "${BUNDLED_JEMALLOC}"
@@ -115,11 +95,110 @@ else()
     message(STATUS "Bundled jemalloc not found; falling back to system memory allocator")
 endif()
 
+target_compile_options(rundb_core
+    PRIVATE
+        -Wall
+        -Wextra
+        -Wpedantic
+        $<$<CONFIG:Release>:-O3 -march=native -fno-omit-frame-pointer>
+        $<$<CONFIG:Debug>:-O0 -g3>
+)
+
 # --------------------------------------------------
-# Target Compile Options & Warnings
+# RunDB Server Executable Target
 # --------------------------------------------------
 
+add_executable(rundb
+    src/main.cpp
+)
+
+target_link_libraries(rundb
+    PRIVATE
+        rundb_core
+)
+
 target_compile_options(rundb
+    PRIVATE
+        -Wall
+        -Wextra
+        -Wpedantic
+        $<$<CONFIG:Release>:-O3 -march=native -fno-omit-frame-pointer>
+        $<$<CONFIG:Debug>:-O0 -g3>
+)
+
+# Copy libjemalloc.so next to the target executable upon successful build
+if(EXISTS "${BUNDLED_JEMALLOC}")
+    add_custom_command(TARGET rundb POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${BUNDLED_JEMALLOC}"
+            "$<TARGET_FILE_DIR:rundb>/libjemalloc.so"
+        COMMENT "Copying bundled libjemalloc.so to output directory"
+    )
+endif()
+
+# --------------------------------------------------
+# Native C++ Unit & Integration Tests Target
+# --------------------------------------------------
+
+enable_testing()
+
+add_executable(rundb_tests
+    tests/test_main.cpp
+    tests/test_alloc.cpp
+    tests/test_sds.cpp
+    tests/test_intset.cpp
+    tests/test_quicklist.cpp
+    tests/test_resp.cpp
+    tests/test_database.cpp
+    tests/test_expiration.cpp
+    tests/test_eviction.cpp
+    tests/test_evaluator.cpp
+    tests/test_aof.cpp
+    tests/test_config.cpp
+    tests/test_network.cpp
+)
+
+target_include_directories(rundb_tests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/tests
+        ${PROJECT_SOURCE_DIR}/include
+)
+
+target_link_libraries(rundb_tests
+    PRIVATE
+        rundb_core
+)
+
+target_compile_options(rundb_tests
+    PRIVATE
+        -Wall
+        -Wextra
+        -Wpedantic
+        $<$<CONFIG:Release>:-O3 -march=native -fno-omit-frame-pointer>
+        $<$<CONFIG:Debug>:-O0 -g3>
+)
+
+add_test(NAME rundb_tests COMMAND rundb_tests)
+
+# --------------------------------------------------
+# Native C++ Benchmarking Suite Target
+# --------------------------------------------------
+
+add_executable(rundb_benchmark
+    tests/benchmark_main.cpp
+)
+
+target_include_directories(rundb_benchmark
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
+)
+
+target_link_libraries(rundb_benchmark
+    PRIVATE
+        rundb_core
+)
+
+target_compile_options(rundb_benchmark
     PRIVATE
         -Wall
         -Wextra
@@ -133,6 +212,6 @@ target_compile_options(rundb
 # --------------------------------------------------
 
 install(
-    TARGETS rundb
+    TARGETS rundb rundb_tests rundb_benchmark
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )

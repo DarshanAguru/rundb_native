@@ -26,8 +26,8 @@ By participating in this project, you agree to abide by our [Code of Conduct](CO
 
 ### 3. Submitting Pull Requests
 * **Fork** the repository and create your branch from `main`.
-* If you've added code that should be tested, add or update appropriate scripts in the `testing_utils/` directory.
-* Ensure your code adheres to Python standards (PEP 8).
+* If you've added code that should be tested, add or update appropriate tests in the `tests/` directory.
+* Ensure your code adheres to modern C++20 conventions.
 * Update documentation (`README.md`, etc.) if your change introduces new configuration settings, commands, or behaviors.
 * Write clear, descriptive commit messages.
 
@@ -38,35 +38,40 @@ By participating in this project, you agree to abide by our [Code of Conduct](CO
 1. **Clone your fork**:
    ```bash
    git clone https://github.com/DarshanAguru/rundb_native.git
-   cd runDB
+   cd rundb_native
    ```
 
-2. **Set up a virtual environment**:
+2. **Build the project**:
    ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate
+   # Debug build (with assertions and sanitizer support)
+   cmake --preset default
+   cmake --build --preset build-debug
+
+   # Release build (maximum optimization -O3 -march=native)
+   cmake --preset release
+   cmake --build --preset build-release
    ```
 
 3. **Run the server locally**:
-   - Default:
-     ```bash
-     python3 main.py
-     ```
-   - Using the `jemalloc` memory allocator:
-     ```bash
-     LD_PRELOAD=./dll/libjemalloc.so python3 main.py
-     ```
-
-4. **Running tests**:
-   Run the automated unit test suite:
    ```bash
-   python3 tests/run_tests.py
+   ./build/release/rundb --port 7379
    ```
 
-   You can also run utility scripts to storm/benchmark the database:
+4. **Running tests**:
+   Run the native C++ unit & integration test suite:
    ```bash
-   python3 testing_utils/set_storm.py
-   python3 testing_utils/set_storm_with_expiration.py
-   python3 testing_utils/eviction_storm.py
-   python3 testing_utils/transaction_storm.py
+   ./build/rundb_tests
+
+   # Or via CTest
+   ctest --test-dir build --output-on-failure
+   ```
+
+5. **Running benchmarks**:
+   Run the native C++ benchmarking suite:
+   ```bash
+   # In-memory engine microbenchmarks
+   ./build/release/rundb_benchmark --engine
+
+   # Network TCP benchmark
+   ./build/release/rundb_benchmark --network
    ```

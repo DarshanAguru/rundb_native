@@ -6,8 +6,8 @@
 namespace rundb::server {
 
 Client::Client(int fd) : m_fd(fd) {
-    m_read_buf.reserve(4096);
-    m_write_buf.reserve(4096);
+    m_read_buf.reserve(8192);
+    m_write_buf.reserve(8192);
 }
 
 Client::~Client() {
@@ -18,6 +18,17 @@ Client::~Client() {
 }
 
 ssize_t Client::read_from_socket() {
+    // Sliding window buffer compaction: only reset or slide when needed
+    if (m_read_pos > 0) {
+        if (m_read_pos >= m_read_buf.size()) {
+            m_read_buf.clear();
+            m_read_pos = 0;
+        } else if (m_read_pos > 4096) {
+            m_read_buf.erase(0, m_read_pos);
+            m_read_pos = 0;
+        }
+    }
+
     char stack_buf[16384];
     ssize_t bytes = ::recv(m_fd, stack_buf, sizeof(stack_buf), 0);
     if (bytes > 0) {
@@ -40,6 +51,13 @@ ssize_t Client::flush_write_buffer() {
     return written;
 }
 
+void Client::buffer_reply(std::string_view data) {
+    m_write_buf.append(data);
+    if (m_write_buf.size() >= 32768) {
+        flush_write_buffer();
+    }
+}
+
 void Client::direct_write_or_buffer(std::string_view data) {
     if (m_write_buf.empty()) {
         ssize_t written = ::send(m_fd, data.data(), data.size(), MSG_NOSIGNAL);
@@ -56,10 +74,10 @@ void Client::direct_write_or_buffer(std::string_view data) {
 }
 
 void Client::consume_read_bytes(size_t count) {
-    if (count >= m_read_buf.size()) {
+    m_read_pos += count;
+    if (m_read_pos >= m_read_buf.size()) {
         m_read_buf.clear();
-    } else {
-        m_read_buf.erase(0, count);
+        m_read_pos = 0;
     }
 }
 

@@ -151,15 +151,22 @@ void Server::handle_client_read(int fd) {
 
         if (!tokens.empty()) {
             std::string reply = m_store.process_command(client->context(), tokens);
-            client->direct_write_or_buffer(reply);
+            client->buffer_reply(reply);
         }
     }
 
-    // Update epoll flags if write buffer has backlog
-    epoll_event ev{};
-    ev.data.fd = fd;
-    ev.events = EPOLLIN | EPOLLET | (client->has_pending_writes() ? static_cast<uint32_t>(EPOLLOUT) : 0u);
-    ::epoll_ctl(m_epoll_fd, EPOLL_CTL_MOD, fd, &ev);
+    // Flush buffered replies produced during this read event
+    client->flush_write_buffer();
+
+    // Update epoll flags only if write interest state changed
+    bool want_out = client->has_pending_writes();
+    if (want_out != client->is_epoll_out()) {
+        client->set_epoll_out(want_out);
+        epoll_event ev{};
+        ev.data.fd = fd;
+        ev.events = EPOLLIN | EPOLLET | (want_out ? static_cast<uint32_t>(EPOLLOUT) : 0u);
+        ::epoll_ctl(m_epoll_fd, EPOLL_CTL_MOD, fd, &ev);
+    }
 }
 
 void Server::handle_client_write(int fd) {
@@ -169,10 +176,14 @@ void Server::handle_client_write(int fd) {
     auto client = it->second;
     client->flush_write_buffer();
 
-    epoll_event ev{};
-    ev.data.fd = fd;
-    ev.events = EPOLLIN | EPOLLET | (client->has_pending_writes() ? static_cast<uint32_t>(EPOLLOUT) : 0u);
-    ::epoll_ctl(m_epoll_fd, EPOLL_CTL_MOD, fd, &ev);
+    bool want_out = client->has_pending_writes();
+    if (want_out != client->is_epoll_out()) {
+        client->set_epoll_out(want_out);
+        epoll_event ev{};
+        ev.data.fd = fd;
+        ev.events = EPOLLIN | EPOLLET | (want_out ? static_cast<uint32_t>(EPOLLOUT) : 0u);
+        ::epoll_ctl(m_epoll_fd, EPOLL_CTL_MOD, fd, &ev);
+    }
 }
 
 void Server::run() {
@@ -183,6 +194,7 @@ void Server::run() {
     epoll_event events[MAX_EPOLL_EVENTS];
 
     while (m_running && !Shutdown::is_shutdown_requested()) {
+        core::RunDBObject::update_global_lru_clock();
         int n = ::epoll_wait(m_epoll_fd, events, MAX_EPOLL_EVENTS, CRON_INTERVAL_MS);
 
         if (n < 0) {

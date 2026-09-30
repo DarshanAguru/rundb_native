@@ -73,8 +73,10 @@ runDB_native/
 │   └── rundb.conf                    # Server configuration file
 ├── lib/
 │   └── libjemalloc.so                # Bundled production jemalloc shared library
-├── tests/
-│   └── test_rundb.py                 # Comprehensive integration test suite
+├── tests/                            # Native C++20 test and benchmarking suite
+│   ├── test_framework.hpp            # Lightweight header-only test runner & assertions
+│   ├── benchmark_main.cpp            # Native C++ benchmarking engine & network suite
+│   └── test_*.cpp                    # Unit & integration tests for all subsystems
 ├── Dockerfile                        # Multi-stage production container build
 ├── docker-compose.yml                # Docker compose deployment
 └── CMakeLists.txt                    # Modern CMake build system with presets
@@ -295,6 +297,40 @@ Start the server pointing to a configuration file:
 Or override individual settings on the command line:
 ```bash
 ./build/release/rundb --config config/rundb.conf --port 8000 --log-level DEBUG
+```
+
+---
+
+## Testing & Benchmarking
+
+RunDB Native features a comprehensive native C++20 testing framework and high-performance benchmarking suite.
+
+### 1. Running the Automated Test Suite
+
+Run the full test suite directly or through CTest:
+```bash
+# Direct test binary (runs 57 unit and integration tests)
+./build/rundb_tests
+
+# Filter tests by subsystem or test name
+./build/rundb_tests --filter Evaluator
+
+# Run via CMake CTest
+ctest --test-dir build --output-on-failure
+```
+
+### 2. Running Native C++ Benchmarks
+
+Run high-resolution benchmarks measuring RPS, latency percentiles (min, avg, p50, p90, p95, p99, max), and memory RSS deltas without Python interpreter overhead:
+```bash
+# Run direct in-memory engine microbenchmarks (millions of ops/sec)
+./build/release/rundb_benchmark --engine -n 100000
+
+# Run high-concurrency TCP network benchmark
+./build/release/rundb_benchmark --network -c 50 -n 50000
+
+# Run all benchmarks
+./build/release/rundb_benchmark
 ```
 
 ---
