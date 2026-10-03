@@ -35,6 +35,8 @@ public:
 
     SDS() noexcept;
     explicit SDS(std::string_view sv);
+    explicit SDS(const char* s) : SDS(std::string_view(s ? s : "")) {}
+    explicit SDS(const std::string& s) : SDS(std::string_view(s)) {}
     SDS(const char* s, size_t len);
     SDS(const SDS& other);
     SDS(SDS&& other) noexcept;
@@ -68,7 +70,11 @@ public:
     bool operator==(const SDS& other) const noexcept;
     bool operator==(std::string_view sv) const noexcept;
     bool operator!=(const SDS& other) const noexcept { return !(*this == other); }
+    bool operator!=(std::string_view sv) const noexcept { return !(*this == sv); }
     bool operator<(const SDS& other) const noexcept;
+    bool operator<(std::string_view sv) const noexcept { return view() < sv; }
+
+    friend std::ostream& operator<<(std::ostream& os, const SDS& sds) { return os << sds.view(); }
 
 private:
     struct HeapHeader {
@@ -93,4 +99,52 @@ private:
     uint8_t m_flags; // Bit 0: 0 = SSO, 1 = Heap
 };
 
+struct TransparentSDSHash {
+    using is_transparent = void;
+    size_t operator()(std::string_view sv) const noexcept {
+        return std::hash<std::string_view>{}(sv);
+    }
+    size_t operator()(const SDS& s) const noexcept {
+        return std::hash<std::string_view>{}(s.view());
+    }
+    size_t operator()(const char* s) const noexcept {
+        return std::hash<std::string_view>{}(s ? std::string_view(s) : std::string_view{});
+    }
+    size_t operator()(const std::string& s) const noexcept {
+        return std::hash<std::string_view>{}(s);
+    }
+};
+
+struct TransparentSDSEqual {
+    using is_transparent = void;
+    bool operator()(const SDS& lhs, const SDS& rhs) const noexcept {
+        return lhs == rhs;
+    }
+    bool operator()(const SDS& lhs, std::string_view rhs) const noexcept {
+        return lhs == rhs;
+    }
+    bool operator()(std::string_view lhs, const SDS& rhs) const noexcept {
+        return rhs == lhs;
+    }
+    bool operator()(const SDS& lhs, const char* rhs) const noexcept {
+        return lhs == (rhs ? std::string_view(rhs) : std::string_view{});
+    }
+    bool operator()(const char* lhs, const SDS& rhs) const noexcept {
+        return rhs == (lhs ? std::string_view(lhs) : std::string_view{});
+    }
+    bool operator()(const SDS& lhs, const std::string& rhs) const noexcept {
+        return lhs == std::string_view(rhs);
+    }
+    bool operator()(const std::string& lhs, const SDS& rhs) const noexcept {
+        return rhs == std::string_view(lhs);
+    }
+};
+
 } // namespace rundb::core::internals
+
+template <>
+struct std::hash<rundb::core::internals::SDS> {
+    size_t operator()(const rundb::core::internals::SDS& s) const noexcept {
+        return std::hash<std::string_view>{}(s.view());
+    }
+};

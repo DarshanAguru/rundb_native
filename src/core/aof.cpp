@@ -53,8 +53,15 @@ void AOF::log_command(const std::vector<std::string>& tokens) {
         serialized += token + "\r\n";
     }
 
-    ssize_t written = ::write(m_fd, serialized.data(), serialized.size());
-    (void)written;
+    size_t written = 0;
+    while (written < serialized.size()) {
+        ssize_t w = ::write(m_fd, serialized.data() + written, serialized.size() - written);
+        if (w < 0) {
+            if (errno == EINTR) continue;
+            return; // Write error
+        }
+        written += static_cast<size_t>(w);
+    }
 
     if (m_policy == AofFsync::Always) {
         ::fdatasync(m_fd);
@@ -81,7 +88,10 @@ void AOF::flush_if_needed() {
 
 bool AOF::load_into(Store& store) {
     int read_fd = ::open(m_filename.c_str(), O_RDONLY);
-    if (read_fd < 0) return false;
+    if (read_fd < 0) {
+        if (errno == ENOENT) return true; // File does not exist yet (clean new instance)
+        return false;
+    }
 
     std::string buffer;
     char chunk[8192];
@@ -93,6 +103,10 @@ bool AOF::load_into(Store& store) {
 
     if (buffer.empty()) return true;
 
+    // Temporarily detach any active AOF on store to avoid re-logging during replay
+    auto attached_aof = store.get_aof();
+    store.detach_aof();
+
     // Parse commands using RESP parser
     protocol::RespParser parser;
     ClientContext ctx;
@@ -100,12 +114,19 @@ bool AOF::load_into(Store& store) {
     size_t offset = 0;
     while (offset < buffer.size()) {
         auto [tokens, consumed] = parser.parse_command(std::string_view(buffer.data() + offset, buffer.size() - offset));
-        if (consumed == 0) break;
+        if (consumed == 0) {
+            // Partial/truncated command at the end of AOF (crash resilience)
+            break;
+        }
         offset += consumed;
 
         if (!tokens.empty()) {
             store.process_command(ctx, tokens);
         }
+    }
+
+    if (attached_aof) {
+        store.attach_aof(attached_aof);
     }
 
     return true;
@@ -122,14 +143,22 @@ bool AOF::dump_all(Store& store) {
     int tmp_fd = ::open(tmp_filename.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (tmp_fd < 0) return false;
 
-    auto write_cmd = [tmp_fd](const std::vector<std::string>& tokens) {
+    auto write_cmd = [tmp_fd](const std::vector<std::string>& tokens) -> bool {
         std::string serialized = "*" + std::to_string(tokens.size()) + "\r\n";
         for (const auto& token : tokens) {
             serialized += "$" + std::to_string(token.size()) + "\r\n";
             serialized += token + "\r\n";
         }
-        ssize_t w = ::write(tmp_fd, serialized.data(), serialized.size());
-        (void)w;
+        size_t written = 0;
+        while (written < serialized.size()) {
+            ssize_t w = ::write(tmp_fd, serialized.data() + written, serialized.size() - written);
+            if (w < 0) {
+                if (errno == EINTR) continue;
+                return false;
+            }
+            written += static_cast<size_t>(w);
+        }
+        return true;
     };
 
     auto now_ms = get_time_ms();
@@ -138,7 +167,11 @@ bool AOF::dump_all(Store& store) {
         if (db.key_count() == 0) continue;
 
         // SELECT <db_id>
-        write_cmd({"SELECT", std::to_string(db.id())});
+        if (!write_cmd({"SELECT", std::to_string(db.id())})) {
+            ::close(tmp_fd);
+            ::unlink(tmp_filename.c_str());
+            return false;
+        }
 
         for (const auto& [key, obj] : db.dict()) {
             if (db.is_expired(key)) continue;
@@ -160,7 +193,9 @@ bool AOF::dump_all(Store& store) {
                         tokens.push_back(std::to_string(v));
                     }
                 } else if (auto* hs = obj->get_hashset()) {
-                    tokens.insert(tokens.end(), hs->begin(), hs->end());
+                    for (const auto& member : *hs) {
+                        tokens.push_back(member.to_string());
+                    }
                 }
                 if (tokens.size() > 2) {
                     write_cmd(tokens);
@@ -176,18 +211,39 @@ bool AOF::dump_all(Store& store) {
         }
     }
 
-    ::fdatasync(tmp_fd);
+    if (::fdatasync(tmp_fd) != 0) {
+        ::close(tmp_fd);
+        ::unlink(tmp_filename.c_str());
+        return false;
+    }
     ::close(tmp_fd);
 
     // Atomically replace the AOF file
     if (::rename(tmp_filename.c_str(), m_filename.c_str()) != 0) {
+        ::unlink(tmp_filename.c_str());
         return false;
     }
 
-    // Reopen main fd in append mode
+    // Sync parent directory to guarantee atomic rename survives hard crash / power loss
+    std::string dir_path = ".";
+    auto slash_pos = m_filename.find_last_of("/\\");
+    if (slash_pos != std::string::npos) {
+        dir_path = m_filename.substr(0, slash_pos);
+        if (dir_path.empty()) dir_path = "/";
+    }
+    int dir_fd = ::open(dir_path.c_str(), O_RDONLY | O_DIRECTORY);
+    if (dir_fd >= 0) {
+        ::fsync(dir_fd);
+        ::close(dir_fd);
+    }
+
+    // Ensure main fd is open in append mode
     if (m_fd >= 0) {
         ::close(m_fd);
-        m_fd = ::open(m_filename.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
+    }
+    m_fd = ::open(m_filename.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
+    if (m_fd >= 0) {
+        m_enabled = true;
     }
 
     return true;

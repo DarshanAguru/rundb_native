@@ -25,7 +25,10 @@ static std::atomic<size_t> s_allocated_bytes{0};
 static std::atomic<size_t> s_allocated_blocks{0};
 
 void* run_malloc(size_t size) {
-    size_t total = PREFIX_SIZE + size;
+    size_t total = 0;
+    if(__builtin_add_overflow(PREFIX_SIZE, size, &total)) {
+        throw std::bad_alloc(); // Handle overflow
+    }
     auto* raw = static_cast<char*>(std::malloc(total));
     if (!raw) throw std::bad_alloc();
 
@@ -40,8 +43,14 @@ void* run_malloc(size_t size) {
 }
 
 void* run_calloc(size_t num, size_t size) {
-    size_t payload_bytes = num * size;
-    size_t total = PREFIX_SIZE + payload_bytes;
+    size_t payload_bytes = 0;
+    if(__builtin_mul_overflow(num, size, &payload_bytes)) {
+        throw std::bad_alloc(); // Handle overflow
+    }
+    size_t total = 0;
+    if(__builtin_add_overflow(PREFIX_SIZE, payload_bytes, &total)) {
+        throw std::bad_alloc(); // Handle overflow
+    }
 
     auto* raw = static_cast<char*>(std::calloc(1, total));
     if (!raw) throw std::bad_alloc();
@@ -67,7 +76,10 @@ void* run_realloc(void* ptr, size_t new_size) {
     auto* hdr = reinterpret_cast<AllocHeader*>(raw);
     size_t old_size = hdr->size;
 
-    size_t total = PREFIX_SIZE + new_size;
+    size_t total = 0;
+    if(__builtin_add_overflow(PREFIX_SIZE, new_size, &total)) {
+        throw std::bad_alloc(); // Handle overflow
+    }
     auto* new_raw = static_cast<char*>(std::realloc(raw, total));
     if (!new_raw) throw std::bad_alloc();
 

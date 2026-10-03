@@ -40,8 +40,8 @@ std::string Store::process_command(ClientContext& ctx, const std::vector<std::st
     // Evaluate command
     std::string resp = Evaluator::evaluate(*this, ctx, tokens);
 
-    // If write command and AOF attached, log it
-    if (m_aof && m_aof->is_enabled() && !tokens.empty()) {
+    // If write command and AOF attached and not in transaction queue, log it
+    if (!ctx.in_transaction && m_aof && m_aof->is_enabled() && !tokens.empty()) {
         std::string cmd = tokens[0];
         for (char& c : cmd) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
 

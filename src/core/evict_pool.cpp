@@ -13,7 +13,7 @@ uint32_t EvictPool::calculate_idle_time(uint32_t obj_lru) noexcept {
     return (0x00FFFFFF - obj_lru) + current;
 }
 
-void EvictPool::insert(uint32_t idle_time, std::string key, int db_id) {
+void EvictPool::insert(uint32_t idle_time, internals::SDS key, int db_id) {
     // Check if key already in pool
     for (auto& cand : m_pool) {
         if (cand.key == key && cand.db_id == db_id) {
@@ -32,6 +32,10 @@ void EvictPool::insert(uint32_t idle_time, std::string key, int db_id) {
     }
 }
 
+void EvictPool::insert(uint32_t idle_time, std::string_view key, int db_id) {
+    insert(idle_time, internals::SDS(key), db_id);
+}
+
 std::optional<EvictCandidate> EvictPool::pop_best() {
     if (m_pool.empty()) return std::nullopt;
     EvictCandidate best = std::move(m_pool.back());
@@ -39,7 +43,7 @@ std::optional<EvictCandidate> EvictPool::pop_best() {
     return best;
 }
 
-void EvictPool::remove_key(const std::string& key, int db_id) {
+void EvictPool::remove_key(std::string_view key, int db_id) {
     m_pool.erase(
         std::remove_if(m_pool.begin(), m_pool.end(), [&](const EvictCandidate& c) {
             return c.key == key && c.db_id == db_id;

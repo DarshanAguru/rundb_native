@@ -15,7 +15,10 @@ void QuickList::Node::operator delete(void* ptr) noexcept {
 size_t QuickList::Node::memory_bytes() const noexcept {
     size_t bytes = sizeof(Node);
     for (size_t i = 0; i < count; ++i) {
-        bytes += items[start_idx + i].capacity();
+        const auto& it = items[start_idx + i];
+        if (!it.is_sso()) {
+            bytes += it.capacity() + 8 + 1;
+        }
     }
     return bytes;
 }
@@ -43,7 +46,7 @@ QuickList::QuickList(const QuickList& other) {
     Node* cur = other.m_head;
     while (cur) {
         for (size_t i = 0; i < cur->count; ++i) {
-            push_back(cur->items[cur->start_idx + i]);
+            push_back(cur->items[cur->start_idx + i].view());
         }
         cur = cur->next;
     }
@@ -64,7 +67,7 @@ QuickList& QuickList::operator=(const QuickList& other) {
     Node* cur = other.m_head;
     while (cur) {
         for (size_t i = 0; i < cur->count; ++i) {
-            push_back(cur->items[cur->start_idx + i]);
+            push_back(cur->items[cur->start_idx + i].view());
         }
         cur = cur->next;
     }
@@ -89,7 +92,7 @@ void QuickList::push_front(std::string_view val) {
     if (!m_head || m_head->start_idx == 0) {
         auto* node = new Node();
         node->start_idx = CHUNK_CAPACITY - 1;
-        node->items[node->start_idx] = std::string(val);
+        node->items[node->start_idx] = SDS(val);
         node->count = 1;
         node->next = m_head;
         if (m_head) {
@@ -101,7 +104,7 @@ void QuickList::push_front(std::string_view val) {
         m_node_count++;
     } else {
         m_head->start_idx--;
-        m_head->items[m_head->start_idx] = std::string(val);
+        m_head->items[m_head->start_idx] = SDS(val);
         m_head->count++;
     }
     m_total_elements++;
@@ -111,7 +114,7 @@ void QuickList::push_back(std::string_view val) {
     if (!m_tail || m_tail->is_full()) {
         auto* node = new Node();
         node->start_idx = 0;
-        node->items[0] = std::string(val);
+        node->items[0] = SDS(val);
         node->count = 1;
         node->prev = m_tail;
         if (m_tail) {
@@ -123,7 +126,7 @@ void QuickList::push_back(std::string_view val) {
         m_node_count++;
     } else {
         size_t next_idx = m_tail->start_idx + m_tail->count;
-        m_tail->items[next_idx] = std::string(val);
+        m_tail->items[next_idx] = SDS(val);
         m_tail->count++;
     }
     m_total_elements++;
@@ -132,7 +135,8 @@ void QuickList::push_back(std::string_view val) {
 std::optional<std::string> QuickList::pop_front() {
     if (!m_head || m_total_elements == 0) return std::nullopt;
 
-    std::string val = std::move(m_head->items[m_head->start_idx]);
+    std::string val = m_head->items[m_head->start_idx].to_string();
+    m_head->items[m_head->start_idx].clear();
     m_head->start_idx++;
     m_head->count--;
     m_total_elements--;
@@ -156,7 +160,8 @@ std::optional<std::string> QuickList::pop_back() {
     if (!m_tail || m_total_elements == 0) return std::nullopt;
 
     size_t last_idx = m_tail->start_idx + m_tail->count - 1;
-    std::string val = std::move(m_tail->items[last_idx]);
+    std::string val = m_tail->items[last_idx].to_string();
+    m_tail->items[last_idx].clear();
     m_tail->count--;
     m_total_elements--;
 
@@ -195,7 +200,7 @@ std::optional<std::string> QuickList::at(int64_t index) const {
         while (cur) {
             if (accumulated + cur->count > target) {
                 size_t offset = target - accumulated;
-                return cur->items[cur->start_idx + offset];
+                return cur->items[cur->start_idx + offset].to_string();
             }
             accumulated += cur->count;
             cur = cur->next;
@@ -207,7 +212,7 @@ std::optional<std::string> QuickList::at(int64_t index) const {
             accumulated -= cur->count;
             if (target >= accumulated) {
                 size_t offset = target - accumulated;
-                return cur->items[cur->start_idx + offset];
+                return cur->items[cur->start_idx + offset].to_string();
             }
             cur = cur->prev;
         }
@@ -243,7 +248,7 @@ std::vector<std::string> QuickList::range(int64_t start, int64_t stop) const {
             size_t seg_start = (u_start > accumulated) ? (u_start - accumulated) : 0;
             size_t seg_end = (u_stop < node_end - 1) ? (u_stop - accumulated) : (cur->count - 1);
             for (size_t i = seg_start; i <= seg_end; ++i) {
-                result.push_back(cur->items[cur->start_idx + i]);
+                result.push_back(cur->items[cur->start_idx + i].to_string());
             }
         }
         accumulated += cur->count;

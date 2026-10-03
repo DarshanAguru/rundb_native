@@ -175,3 +175,92 @@ TEST_CASE("Evaluator_WrongTypeSafety") {
     std::string wt3 = Evaluator::evaluate(store, ctx, {"LPOP", "str_key"});
     ASSERT_CONTAINS(wt3, "WRONGTYPE");
 }
+
+TEST_CASE("Evaluator_InvalidIntegerHandling") {
+    Store store;
+    ClientContext ctx;
+
+    // SET EX / PX with invalid numbers
+    std::string res1 = Evaluator::evaluate(store, ctx, {"SET", "k", "v", "EX", "abc"});
+    ASSERT_CONTAINS(res1, "ERR");
+    std::string res2 = Evaluator::evaluate(store, ctx, {"SET", "k", "v", "PX", "not_a_num"});
+    ASSERT_CONTAINS(res2, "ERR");
+
+    // INCRBY / DECRBY with invalid numbers
+    std::string res3 = Evaluator::evaluate(store, ctx, {"INCRBY", "k", "xyz"});
+    ASSERT_CONTAINS(res3, "ERR");
+    std::string res4 = Evaluator::evaluate(store, ctx, {"DECRBY", "k", "xyz"});
+    ASSERT_CONTAINS(res4, "ERR");
+
+    // LINDEX / LRANGE with invalid numbers
+    Evaluator::evaluate(store, ctx, {"RPUSH", "my_list", "a", "b"});
+    std::string res5 = Evaluator::evaluate(store, ctx, {"LINDEX", "my_list", "invalid"});
+    ASSERT_CONTAINS(res5, "ERR");
+    std::string res6 = Evaluator::evaluate(store, ctx, {"LRANGE", "my_list", "foo", "bar"});
+    ASSERT_CONTAINS(res6, "ERR");
+
+    // EXPIRE with invalid number
+    std::string res7 = Evaluator::evaluate(store, ctx, {"EXPIRE", "my_list", "bad"});
+    ASSERT_CONTAINS(res7, "ERR");
+
+    // SELECT with invalid number
+    std::string res8 = Evaluator::evaluate(store, ctx, {"SELECT", "bad"});
+    ASSERT_CONTAINS(res8, "ERR");
+}
+
+TEST_CASE("Evaluator_InlineIntMgetStrlen") {
+    Store store;
+    ClientContext ctx;
+
+    // Numbers stored as InlineInt
+    Evaluator::evaluate(store, ctx, {"SET", "num_key", "12345"});
+    Evaluator::evaluate(store, ctx, {"SET", "str_key", "hello"});
+
+    // STRLEN on InlineInt
+    ASSERT_EQ(Evaluator::evaluate(store, ctx, {"STRLEN", "num_key"}), ":5\r\n");
+    ASSERT_EQ(Evaluator::evaluate(store, ctx, {"STRLEN", "str_key"}), ":5\r\n");
+
+    // MGET combining InlineInt, regular string, and missing key
+    std::string mget_res = Evaluator::evaluate(store, ctx, {"MGET", "num_key", "str_key", "missing_key"});
+    ASSERT_EQ(mget_res, "*3\r\n$5\r\n12345\r\n$5\r\nhello\r\n$-1\r\n");
+}
+
+TEST_CASE("Evaluator_IncrNonNumericString") {
+    Store store;
+    ClientContext ctx;
+
+    Evaluator::evaluate(store, ctx, {"SET", "str_val", "not_a_number"});
+    std::string res = Evaluator::evaluate(store, ctx, {"INCR", "str_val"});
+    ASSERT_CONTAINS(res, "ERR");
+}
+
+TEST_CASE("Evaluator_KeysCommand") {
+    Store store;
+    ClientContext ctx;
+
+    Evaluator::evaluate(store, ctx, {"SET", "key_a", "1"});
+    Evaluator::evaluate(store, ctx, {"SET", "key_b", "2"});
+
+    std::string all_keys = Evaluator::evaluate(store, ctx, {"KEYS", "*"});
+    ASSERT_CONTAINS(all_keys, "key_a");
+    ASSERT_CONTAINS(all_keys, "key_b");
+
+    std::string single_key = Evaluator::evaluate(store, ctx, {"KEYS", "key_a"});
+    ASSERT_CONTAINS(single_key, "key_a");
+    ASSERT_FALSE(single_key.find("key_b") != std::string::npos);
+}
+
+TEST_CASE("Evaluator_ExpireAtAndPExpireAt") {
+    Store store;
+    ClientContext ctx;
+
+    Evaluator::evaluate(store, ctx, {"SET", "expire_key", "val"});
+    auto now_sec = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    std::string res1 = Evaluator::evaluate(store, ctx, {"EXPIREAT", "expire_key", std::to_string(now_sec + 100)});
+    ASSERT_EQ(res1, ":1\r\n");
+
+    std::string ttl_res = Evaluator::evaluate(store, ctx, {"TTL", "expire_key"});
+    ASSERT_CONTAINS(ttl_res, ":");
+    ASSERT_FALSE(ttl_res == ":-1\r\n");
+    ASSERT_FALSE(ttl_res == ":-2\r\n");
+}

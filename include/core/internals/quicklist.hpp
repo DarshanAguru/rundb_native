@@ -7,6 +7,7 @@
 #include <vector>
 #include <optional>
 #include <memory>
+#include "core/internals/sds.hpp"
 
 namespace rundb::core::internals {
 
@@ -58,7 +59,7 @@ public:
 
 private:
     struct Node {
-        std::string items[CHUNK_CAPACITY];
+        SDS items[CHUNK_CAPACITY];
         uint16_t start_idx{0}; // Start offset inside items
         uint16_t count{0};     // Active items count
         Node* prev{nullptr};

@@ -1,8 +1,8 @@
 #include "core/object.hpp"
 #include <chrono>
 #include <charconv>
-
 #include <atomic>
+#include <cctype>
 
 namespace rundb::core {
 
@@ -49,7 +49,7 @@ std::shared_ptr<RunDBObject> RunDBObject::create_string(std::string_view val) {
     return std::make_shared<RunDBObject>(
         ObjectType::String,
         ObjectEncoding::Raw,
-        std::string(val)
+        internals::SDS(val)
     );
 }
 
@@ -82,16 +82,30 @@ std::string RunDBObject::get_string_value() const {
         return std::to_string(std::get<int64_t>(m_val));
     }
     if (std::holds_alternative<StringData>(m_val)) {
-        return std::get<StringData>(m_val);
+        return std::get<StringData>(m_val).to_string();
     }
     return "";
 }
 
 std::string_view RunDBObject::get_string_view() const noexcept {
     if (std::holds_alternative<StringData>(m_val)) {
-        return std::get<StringData>(m_val);
+        return std::get<StringData>(m_val).view();
     }
     return {};
+}
+
+const internals::SDS* RunDBObject::get_sds() const noexcept {
+    if (std::holds_alternative<StringData>(m_val)) {
+        return &std::get<StringData>(m_val);
+    }
+    return nullptr;
+}
+
+internals::SDS* RunDBObject::get_sds() noexcept {
+    if (std::holds_alternative<StringData>(m_val)) {
+        return &std::get<StringData>(m_val);
+    }
+    return nullptr;
 }
 
 int64_t RunDBObject::get_int_value() const {
@@ -158,7 +172,7 @@ void RunDBObject::promote_to_hashset() {
     if (std::holds_alternative<IntSetData>(m_val)) {
         const auto& is = std::get<IntSetData>(m_val);
         for (int64_t v : is.to_vector()) {
-            hs.insert(std::to_string(v));
+            hs.emplace(std::to_string(v));
         }
     }
     m_val = std::move(hs);
@@ -174,17 +188,17 @@ bool RunDBObject::set_add(std::string_view member) {
             auto* is = get_intset();
             if (is->size() >= SET_MAX_INTSET_ENTRIES) {
                 promote_to_hashset();
-                return get_hashset()->insert(std::string(member)).second;
+                return get_hashset()->emplace(member).second;
             }
             return is->add(parsed_int);
         } else {
             promote_to_hashset();
-            return get_hashset()->insert(std::string(member)).second;
+            return get_hashset()->emplace(member).second;
         }
     }
 
     if (auto* hs = get_hashset()) {
-        return hs->insert(std::string(member)).second;
+        return hs->emplace(member).second;
     }
     return false;
 }
@@ -199,7 +213,12 @@ bool RunDBObject::set_remove(std::string_view member) {
         return false;
     }
     if (auto* hs = get_hashset()) {
-        return hs->erase(std::string(member)) > 0;
+        auto it = hs->find(member);
+        if (it != hs->end()) {
+            hs->erase(it);
+            return true;
+        }
+        return false;
     }
     return false;
 }
@@ -214,7 +233,7 @@ bool RunDBObject::set_contains(std::string_view member) const {
         return false;
     }
     if (const auto* hs = get_hashset()) {
-        return hs->find(std::string(member)) != hs->end();
+        return hs->find(member) != hs->end();
     }
     return false;
 }
@@ -232,7 +251,10 @@ size_t RunDBObject::set_size() const {
 size_t RunDBObject::memory_bytes() const noexcept {
     size_t base = sizeof(RunDBObject);
     if (encoding() == ObjectEncoding::Raw && std::holds_alternative<StringData>(m_val)) {
-        base += std::get<StringData>(m_val).capacity();
+        const auto& s = std::get<StringData>(m_val);
+        if (!s.is_sso()) {
+            base += s.capacity() + 8 + 1;
+        }
     } else if (encoding() == ObjectEncoding::QuickList && std::holds_alternative<ListData>(m_val)) {
         base += std::get<ListData>(m_val).memory_bytes();
     } else if (encoding() == ObjectEncoding::IntSet && std::holds_alternative<IntSetData>(m_val)) {
@@ -241,7 +263,7 @@ size_t RunDBObject::memory_bytes() const noexcept {
         const auto& hs = std::get<HashSetData>(m_val);
         base += hs.bucket_count() * sizeof(void*);
         for (const auto& s : hs) {
-            base += sizeof(void*) * 2 + s.capacity();
+            base += sizeof(void*) * 2 + (s.is_sso() ? 0 : s.capacity() + 8 + 1);
         }
     }
     return base;

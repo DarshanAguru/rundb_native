@@ -20,6 +20,13 @@ static std::string to_upper(std::string_view sv) {
     return s;
 }
 
+template <typename T>
+static bool parse_int(std::string_view sv, T& out) {
+    if (sv.empty()) return false;
+    auto [ptr, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), out);
+    return ec == std::errc() && ptr == sv.data() + sv.size();
+}
+
 std::string Evaluator::evaluate(Store& store, ClientContext& ctx, const std::vector<std::string>& tokens) {
     if (tokens.empty()) return RespParser::encode_error("ERR empty command");
 
@@ -94,11 +101,13 @@ std::string Evaluator::eval_strings(Store& /*store*/, Database& db, const std::s
         for (size_t i = 3; i < tokens.size(); ++i) {
             std::string opt = to_upper(tokens[i]);
             if (opt == "EX" && i + 1 < tokens.size()) {
-                int64_t sec = std::stoll(tokens[++i]);
+                int64_t sec = 0;
+                if (!parse_int(tokens[++i], sec)) return RespParser::encode_error("ERR value is not an integer or out of range");
                 auto now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
                 expire_at_ms = static_cast<uint64_t>(now + (sec * 1000));
             } else if (opt == "PX" && i + 1 < tokens.size()) {
-                int64_t ms = std::stoll(tokens[++i]);
+                int64_t ms = 0;
+                if (!parse_int(tokens[++i], ms)) return RespParser::encode_error("ERR value is not an integer or out of range");
                 auto now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
                 expire_at_ms = static_cast<uint64_t>(now + ms);
             } else if (opt == "NX") {
@@ -156,7 +165,11 @@ std::string Evaluator::eval_strings(Store& /*store*/, Database& db, const std::s
                 Stats::instance().record_miss();
             } else {
                 Stats::instance().record_hit();
-                out += RespParser::encode_bulk_string(obj->get_string_value());
+                if (obj->encoding() == ObjectEncoding::InlineInt) {
+                    out += RespParser::encode_bulk_string(std::to_string(obj->get_int_value()));
+                } else {
+                    out += RespParser::encode_bulk_string(obj->get_string_view());
+                }
             }
         }
         return out;
@@ -172,8 +185,13 @@ std::string Evaluator::eval_strings(Store& /*store*/, Database& db, const std::s
 
         int64_t delta = 1;
         if (cmd == "DECR") delta = -1;
-        if (cmd == "INCRBY") delta = std::stoll(tokens[2]);
-        if (cmd == "DECRBY") delta = -std::stoll(tokens[2]);
+        if (cmd == "INCRBY" || cmd == "DECRBY") {
+            int64_t parsed = 0;
+            if (!parse_int(tokens[2], parsed)) {
+                return RespParser::encode_error("ERR value is not an integer or out of range");
+            }
+            delta = (cmd == "DECRBY") ? -parsed : parsed;
+        }
 
         const std::string& key = tokens[1];
         auto obj = db.get(key);
@@ -186,10 +204,21 @@ std::string Evaluator::eval_strings(Store& /*store*/, Database& db, const std::s
             return RespParser::encode_error("WRONGTYPE Operation against a key holding the wrong kind of value");
         }
 
-        int64_t cur = obj->get_int_value();
-        cur += delta;
-        db.set(key, RunDBObject::create_int(cur));
-        return RespParser::encode_integer(cur);
+        int64_t cur = 0;
+        if (obj->encoding() == ObjectEncoding::InlineInt) {
+            cur = obj->get_int_value();
+        } else {
+            if (!parse_int(obj->get_string_view(), cur)) {
+                return RespParser::encode_error("ERR value is not an integer or out of range");
+            }
+        }
+
+        int64_t result = 0;
+        if (__builtin_add_overflow(cur, delta, &result)) {
+            return RespParser::encode_error("ERR increment or decrement would overflow");
+        }
+        db.set(key, RunDBObject::create_int(result));
+        return RespParser::encode_integer(result);
     }
 
     if (cmd == "APPEND") {
@@ -207,10 +236,16 @@ std::string Evaluator::eval_strings(Store& /*store*/, Database& db, const std::s
             return RespParser::encode_error("WRONGTYPE Operation against a key holding the wrong kind of value");
         }
 
-        std::string val = obj->get_string_value() + suffix;
-        size_t len = val.size();
-        db.set(key, RunDBObject::create_string(val));
-        return RespParser::encode_integer(static_cast<int64_t>(len));
+        if (auto* sds = obj->get_sds()) {
+            sds->append(suffix);
+            obj->update_lru();
+            return RespParser::encode_integer(static_cast<int64_t>(sds->size()));
+        } else {
+            std::string val = obj->get_string_value() + suffix;
+            size_t len = val.size();
+            db.set(key, RunDBObject::create_string(val));
+            return RespParser::encode_integer(static_cast<int64_t>(len));
+        }
     }
 
     if (cmd == "STRLEN") {
@@ -220,7 +255,15 @@ std::string Evaluator::eval_strings(Store& /*store*/, Database& db, const std::s
         if (obj->type() != ObjectType::String) {
             return RespParser::encode_error("WRONGTYPE Operation against a key holding the wrong kind of value");
         }
-        return RespParser::encode_integer(static_cast<int64_t>(obj->get_string_value().size()));
+        if (obj->encoding() == ObjectEncoding::InlineInt) {
+            char buf[32];
+            auto [ptr, ec] = std::to_chars(buf, buf + sizeof(buf), obj->get_int_value());
+            return RespParser::encode_integer(static_cast<int64_t>(ptr - buf));
+        }
+        if (const auto* sds = obj->get_sds()) {
+            return RespParser::encode_integer(static_cast<int64_t>(sds->size()));
+        }
+        return RespParser::encode_integer(static_cast<int64_t>(obj->get_string_view().size()));
     }
 
     return RespParser::encode_error("ERR unknown string command");
@@ -285,7 +328,8 @@ std::string Evaluator::eval_lists(Store& /*store*/, Database& db, const std::str
         if (obj->type() != ObjectType::List) {
             return RespParser::encode_error("WRONGTYPE Operation against a key holding the wrong kind of value");
         }
-        int64_t idx = std::stoll(tokens[2]);
+        int64_t idx = 0;
+        if (!parse_int(tokens[2], idx)) return RespParser::encode_error("ERR value is not an integer or out of range");
         auto elem = obj->get_list()->at(idx);
         if (!elem.has_value()) return RespParser::encode_nil();
         return RespParser::encode_bulk_string(*elem);
@@ -298,8 +342,11 @@ std::string Evaluator::eval_lists(Store& /*store*/, Database& db, const std::str
         if (obj->type() != ObjectType::List) {
             return RespParser::encode_error("WRONGTYPE Operation against a key holding the wrong kind of value");
         }
-        int64_t start = std::stoll(tokens[2]);
-        int64_t stop = std::stoll(tokens[3]);
+        int64_t start = 0;
+        int64_t stop = 0;
+        if (!parse_int(tokens[2], start) || !parse_int(tokens[3], stop)) {
+            return RespParser::encode_error("ERR value is not an integer or out of range");
+        }
         auto items = obj->get_list()->range(start, stop);
         return RespParser::encode_array(items);
     }
@@ -382,7 +429,10 @@ std::string Evaluator::eval_sets(Store& /*store*/, Database& db, const std::stri
                 members.push_back(std::to_string(v));
             }
         } else if (auto* hs = obj->get_hashset()) {
-            members.assign(hs->begin(), hs->end());
+            members.reserve(hs->size());
+            for (const auto& item : *hs) {
+                members.push_back(item.to_string());
+            }
         }
         return RespParser::encode_array(members);
     }
@@ -423,12 +473,23 @@ std::string Evaluator::eval_generic(Store& store, Database& db, const std::strin
         return RespParser::encode_simple_string("none");
     }
 
-    if (cmd == "EXPIRE" || cmd == "PEXPIRE") {
+    if (cmd == "EXPIRE" || cmd == "PEXPIRE" || cmd == "EXPIREAT" || cmd == "PEXPIREAT") {
         if (tokens.size() != 3) return RespParser::encode_error("ERR wrong number of arguments for '" + cmd + "' command");
-        int64_t val = std::stoll(tokens[2]);
-        uint64_t ttl_ms = (cmd == "EXPIRE") ? (val * 1000) : val;
-        auto now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-        bool ok = db.set_expire(tokens[1], static_cast<uint64_t>(now + ttl_ms));
+        int64_t val = 0;
+        if (!parse_int(tokens[2], val)) return RespParser::encode_error("ERR value is not an integer or out of range");
+        uint64_t expire_at_ms = 0;
+        if (cmd == "EXPIRE") {
+            auto now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+            expire_at_ms = static_cast<uint64_t>(now + (val * 1000));
+        } else if (cmd == "PEXPIRE") {
+            auto now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+            expire_at_ms = static_cast<uint64_t>(now + val);
+        } else if (cmd == "EXPIREAT") {
+            expire_at_ms = static_cast<uint64_t>(val * 1000);
+        } else if (cmd == "PEXPIREAT") {
+            expire_at_ms = static_cast<uint64_t>(val);
+        }
+        bool ok = db.set_expire(tokens[1], expire_at_ms);
         return RespParser::encode_integer(ok ? 1 : 0);
     }
 
@@ -443,6 +504,19 @@ std::string Evaluator::eval_generic(Store& store, Database& db, const std::strin
     if (cmd == "PERSIST") {
         if (tokens.size() != 2) return RespParser::encode_error("ERR wrong number of arguments for 'persist' command");
         return RespParser::encode_integer(db.persist(tokens[1]) ? 1 : 0);
+    }
+
+    if (cmd == "KEYS") {
+        if (tokens.size() != 2) return RespParser::encode_error("ERR wrong number of arguments for 'keys' command");
+        std::string_view pattern = tokens[1];
+        std::vector<std::string> matched_keys;
+        for (const auto& [k, v] : db.dict()) {
+            if (db.is_expired(k)) continue;
+            if (pattern == "*" || pattern == k) {
+                matched_keys.push_back(k);
+            }
+        }
+        return RespParser::encode_array(matched_keys);
     }
 
     if (cmd == "FLUSHDB") {
@@ -473,8 +547,8 @@ std::string Evaluator::eval_admin(Store& store, ClientContext& ctx, Database& db
 
     if (cmd == "SELECT") {
         if (tokens.size() != 2) return RespParser::encode_error("ERR wrong number of arguments for 'select' command");
-        int db_id = std::stoi(tokens[1]);
-        if (db_id < 0 || static_cast<size_t>(db_id) >= store.db_count()) {
+        int db_id = 0;
+        if (!parse_int(tokens[1], db_id) || db_id < 0 || static_cast<size_t>(db_id) >= store.db_count()) {
             return RespParser::encode_error("ERR DB index is out of range");
         }
         ctx.active_db = db_id;
@@ -533,13 +607,16 @@ std::string Evaluator::eval_admin(Store& store, ClientContext& ctx, Database& db
     }
 
     if (cmd == "BGREWRITEAOF") {
-        if (auto aof = store.get_aof()) {
-            if (aof->dump_all(store)) {
-                return RespParser::encode_simple_string("Background append only file rewriting started");
-            }
-            return RespParser::encode_error("ERR Failed to rewrite AOF file");
+        auto aof = store.get_aof();
+        if (!aof) {
+            aof = std::make_shared<AOF>("appendonly.aof", AofFsync::EverySec);
+            aof->open();
+            store.attach_aof(aof);
         }
-        return RespParser::encode_error("ERR AOF persistence is not enabled");
+        if (aof->dump_all(store)) {
+            return RespParser::encode_simple_string("Background append only file rewriting started");
+        }
+        return RespParser::encode_error("ERR Failed to rewrite AOF file");
     }
 
     if (cmd == "CLIENT") {
@@ -595,6 +672,21 @@ std::string Evaluator::eval_transaction(Store& store, ClientContext& ctx, const 
         std::string reply = "*" + std::to_string(queued.size()) + "\r\n";
         for (const auto& sub_tokens : queued) {
             reply += evaluate(store, ctx, sub_tokens);
+            // Log to AOF if write command
+            if (auto aof = store.get_aof(); aof && aof->is_enabled() && !sub_tokens.empty()) {
+                std::string sub_cmd = sub_tokens[0];
+                for (char& c : sub_cmd) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+                static const std::unordered_set<std::string> WRITE_CMDS = {
+                    "SET", "MSET", "INCR", "DECR", "INCRBY", "DECRBY", "APPEND",
+                    "LPUSH", "RPUSH", "LPOP", "RPOP",
+                    "SADD", "SREM",
+                    "DEL", "FLUSHDB", "FLUSHALL", "EXPIRE", "PEXPIRE", "EXPIREAT", "PEXPIREAT", "PERSIST",
+                    "SELECT"
+                };
+                if (WRITE_CMDS.find(sub_cmd) != WRITE_CMDS.end()) {
+                    aof->log_command(sub_tokens);
+                }
+            }
         }
         return reply;
     }

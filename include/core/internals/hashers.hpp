@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <string_view>
+#include <cstring>
 
 namespace rundb::core::internals {
 
@@ -20,12 +21,11 @@ public:
         const uint64_t m = 0xc6a4a7935bd1e995ULL;
         const int r = 47;
         uint64_t h = seed ^ (key.size() * m);
-
-        const auto* data = reinterpret_cast<const uint64_t*>(key.data());
         size_t nblocks = key.size() / 8;
 
         for (size_t i = 0; i < nblocks; ++i) {
-            uint64_t k = data[i];
+            uint64_t k = 0;
+            std::memcpy(&k, key.data() + (i * 8), sizeof(uint64_t));
             k *= m;
             k ^= k >> r;
             k *= m;

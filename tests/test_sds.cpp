@@ -120,3 +120,21 @@ TEST_CASE("SDS_Comparisons") {
     ASSERT_TRUE(a == "apple");
     ASSERT_FALSE(a == "banana");
 }
+
+TEST_CASE("SDS_SelfAppend") {
+    // 1. Self append within SSO
+    SDS s("abc");
+    s.append(s.view());
+    ASSERT_EQ(s.view(), "abcabc");
+
+    // 2. Self append triggering SSO to heap transition
+    SDS s2("123456789012"); // 12 chars
+    s2.append(s2.view());    // 24 chars -> exceeds 22 bytes, triggers reserve and heap migration
+    ASSERT_EQ(s2.view(), "123456789012123456789012");
+    ASSERT_FALSE(s2.is_sso());
+
+    // 3. Self append on heap triggering reallocation
+    s2.append(s2.view()); // 48 chars
+    ASSERT_EQ(s2.size(), 48);
+    ASSERT_EQ(s2.view(), "123456789012123456789012123456789012123456789012");
+}

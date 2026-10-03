@@ -38,7 +38,7 @@ SDS::SDS(const char* s, size_t len) : SDS(std::string_view(s, len)) {}
 SDS::SDS(const SDS& other) : m_flags(other.m_flags) {
     if (is_sso()) {
         m_sso = other.m_sso;
-    } else {
+    } else if (other.m_heap.header) {
         size_t alloc_cap = other.m_heap.header->alloc;
         size_t len = other.m_heap.header->len;
         size_t total_bytes = sizeof(HeapHeader) + alloc_cap + 1;
@@ -48,6 +48,10 @@ SDS::SDS(const SDS& other) : m_flags(other.m_flags) {
         hdr->alloc = static_cast<uint32_t>(alloc_cap);
         std::memcpy(mem + sizeof(HeapHeader), other.data(), len + 1);
         m_heap.header = hdr;
+    } else {
+        m_flags = 0;
+        m_sso.len = 0;
+        m_sso.buf[0] = '\0';
     }
 }
 
@@ -77,7 +81,7 @@ SDS& SDS::operator=(const SDS& other) {
     m_flags = other.m_flags;
     if (is_sso()) {
         m_sso = other.m_sso;
-    } else {
+    } else if (other.m_heap.header) {
         size_t alloc_cap = other.m_heap.header->alloc;
         size_t len = other.m_heap.header->len;
         size_t total_bytes = sizeof(HeapHeader) + alloc_cap + 1;
@@ -87,6 +91,10 @@ SDS& SDS::operator=(const SDS& other) {
         hdr->alloc = static_cast<uint32_t>(alloc_cap);
         std::memcpy(mem + sizeof(HeapHeader), other.data(), len + 1);
         m_heap.header = hdr;
+    } else {
+        m_flags = 0;
+        m_sso.len = 0;
+        m_sso.buf[0] = '\0';
     }
     return *this;
 }
@@ -181,8 +189,12 @@ void SDS::append(const char* s, size_t len) {
     size_t current_len = size();
     size_t required = current_len + len;
 
+    const char* my_data = data();
+    bool is_self = (s >= my_data && s < my_data + current_len);
+    size_t self_offset = is_self ? static_cast<size_t>(s - my_data) : 0;
+
     if (is_sso() && required <= SSO_CAPACITY) {
-        std::memcpy(m_sso.buf + current_len, s, len);
+        std::memmove(m_sso.buf + current_len, s, len);
         m_sso.len = static_cast<uint8_t>(required);
         m_sso.buf[required] = '\0';
         return;
@@ -193,10 +205,13 @@ void SDS::append(const char* s, size_t len) {
         size_t next_cap = (capacity() < 32) ? 64 : capacity() + (capacity() >> 1);
         if (next_cap < required) next_cap = required;
         reserve(next_cap);
+        if (is_self) {
+            s = data() + self_offset;
+        }
     }
 
     char* target = data() + current_len;
-    std::memcpy(target, s, len);
+    std::memmove(target, s, len);
     target[len] = '\0';
 
     if (!is_sso()) {

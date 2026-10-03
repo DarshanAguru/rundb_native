@@ -77,7 +77,7 @@ size_t Eviction::perform_eviction(
             }
 
             if (cand->db_id >= 0 && static_cast<size_t>(cand->db_id) < databases.size()) {
-                databases[cand->db_id].del(cand->key);
+                databases[cand->db_id].del(cand->key.view());
                 evicted_count++;
             }
         }

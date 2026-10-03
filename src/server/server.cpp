@@ -252,6 +252,10 @@ void Server::stop() noexcept {
         m_epoll_fd = -1;
     }
 
+    if (auto aof = m_store.get_aof()) {
+        aof->close();
+    }
+
     size_t used = core::Eviction::get_used_memory();
     size_t maxm = m_store.get_maxmemory();
     rundb::Printer::print_shutdown_complete(used, maxm);

@@ -125,15 +125,30 @@ std::vector<std::string> Database::sample_keys(size_t count) {
     std::vector<std::string> sampled;
     if (m_dict.empty()) return sampled;
 
-    sampled.reserve(std::min(count, m_dict.size()));
+    size_t target_count = std::min(count, m_dict.size());
+    sampled.reserve(target_count);
     static thread_local std::mt19937 gen{std::random_device{}()};
-    std::uniform_int_distribution<size_t> dist(0, m_dict.size() - 1);
+    size_t num_buckets = m_dict.bucket_count();
+    std::uniform_int_distribution<size_t> bucket_dist(0, num_buckets - 1);
 
-    for (size_t i = 0; i < count && !m_dict.empty(); ++i) {
-        size_t step = dist(gen) % m_dict.size();
-        auto cur = m_dict.begin();
-        std::advance(cur, step);
-        sampled.push_back(cur->first);
+    size_t max_tries = count * 5;
+    size_t tries = 0;
+    while (sampled.size() < target_count && tries++ < max_tries) {
+        size_t b = bucket_dist(gen);
+        if (m_dict.bucket_size(b) > 0) {
+            auto it = m_dict.begin(b);
+            if (std::find(sampled.begin(), sampled.end(), it->first) == sampled.end()) {
+                sampled.push_back(it->first);
+            }
+        }
+    }
+
+    if (sampled.size() < target_count) {
+        for (auto it = m_dict.begin(); it != m_dict.end() && sampled.size() < target_count; ++it) {
+            if (std::find(sampled.begin(), sampled.end(), it->first) == sampled.end()) {
+                sampled.push_back(it->first);
+            }
+        }
     }
     return sampled;
 }
@@ -142,15 +157,30 @@ std::vector<std::string> Database::sample_expires(size_t count) {
     std::vector<std::string> sampled;
     if (m_expires.empty()) return sampled;
 
-    sampled.reserve(std::min(count, m_expires.size()));
+    size_t target_count = std::min(count, m_expires.size());
+    sampled.reserve(target_count);
     static thread_local std::mt19937 gen{std::random_device{}()};
-    std::uniform_int_distribution<size_t> dist(0, m_expires.size() - 1);
+    size_t num_buckets = m_expires.bucket_count();
+    std::uniform_int_distribution<size_t> bucket_dist(0, num_buckets - 1);
 
-    for (size_t i = 0; i < count && !m_expires.empty(); ++i) {
-        size_t step = dist(gen) % m_expires.size();
-        auto cur = m_expires.begin();
-        std::advance(cur, step);
-        sampled.push_back(cur->first);
+    size_t max_tries = count * 5;
+    size_t tries = 0;
+    while (sampled.size() < target_count && tries++ < max_tries) {
+        size_t b = bucket_dist(gen);
+        if (m_expires.bucket_size(b) > 0) {
+            auto it = m_expires.begin(b);
+            if (std::find(sampled.begin(), sampled.end(), it->first) == sampled.end()) {
+                sampled.push_back(it->first);
+            }
+        }
+    }
+
+    if (sampled.size() < target_count) {
+        for (auto it = m_expires.begin(); it != m_expires.end() && sampled.size() < target_count; ++it) {
+            if (std::find(sampled.begin(), sampled.end(), it->first) == sampled.end()) {
+                sampled.push_back(it->first);
+            }
+        }
     }
     return sampled;
 }

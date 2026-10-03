@@ -104,3 +104,119 @@ TEST_CASE("AOF_DumpAllCompaction") {
         std::filesystem::remove(aof_file);
     }
 }
+
+TEST_CASE("AOF_TransactionDiscardSafety") {
+    const std::string aof_file = "test_tx_aof.aof";
+    if (std::filesystem::exists(aof_file)) {
+        std::filesystem::remove(aof_file);
+    }
+
+    {
+        Store store;
+        auto aof = std::make_shared<AOF>(aof_file, AofFsync::Always);
+        ASSERT_TRUE(aof->open());
+        store.attach_aof(aof);
+        ClientContext ctx;
+
+        // Discarded transaction
+        store.process_command(ctx, {"MULTI"});
+        store.process_command(ctx, {"SET", "discarded_key", "discarded_val"});
+        store.process_command(ctx, {"DISCARD"});
+
+        // Executed transaction
+        store.process_command(ctx, {"MULTI"});
+        store.process_command(ctx, {"SET", "executed_key", "executed_val"});
+        store.process_command(ctx, {"EXEC"});
+    }
+
+    // Verify recovery: discarded_key must NOT exist, executed_key must exist
+    {
+        Store reloaded_store;
+        AOF aof(aof_file, AofFsync::Always);
+        ASSERT_TRUE(aof.load_into(reloaded_store));
+
+        Database& db = reloaded_store.get_db(0);
+        ASSERT_FALSE(db.exists("discarded_key"));
+        ASSERT_TRUE(db.exists("executed_key"));
+    }
+
+    if (std::filesystem::exists(aof_file)) {
+        std::filesystem::remove(aof_file);
+    }
+}
+
+TEST_CASE("AOF_BgRewriteAofAutoCreate") {
+    const std::string default_aof = "appendonly.aof";
+    if (std::filesystem::exists(default_aof)) {
+        std::filesystem::remove(default_aof);
+    }
+
+    {
+        Store store; // No AOF initially attached
+        ClientContext ctx;
+        store.process_command(ctx, {"SET", "auto_key", "auto_val"});
+
+        std::string reply = store.process_command(ctx, {"BGREWRITEAOF"});
+        ASSERT_CONTAINS(reply, "rewriting started");
+        ASSERT_TRUE(store.get_aof() != nullptr);
+        ASSERT_TRUE(std::filesystem::exists(default_aof));
+    }
+
+    // Verify replaying the auto-created AOF restores data
+    {
+        Store reloaded_store;
+        AOF aof(default_aof, AofFsync::EverySec);
+        ASSERT_TRUE(aof.load_into(reloaded_store));
+
+        Database& db = reloaded_store.get_db(0);
+        ASSERT_TRUE(db.exists("auto_key"));
+        auto obj = db.get("auto_key");
+        ASSERT_TRUE(obj != nullptr);
+        ASSERT_EQ(obj->get_string_value(), "auto_val");
+    }
+
+    if (std::filesystem::exists(default_aof)) {
+        std::filesystem::remove(default_aof);
+    }
+}
+
+TEST_CASE("AOF_CrashTruncatedRecovery") {
+    const std::string aof_file = "test_truncated_crash.aof";
+    if (std::filesystem::exists(aof_file)) {
+        std::filesystem::remove(aof_file);
+    }
+
+    // 1. Write valid commands followed by an incomplete truncated command simulating a crash mid-write
+    {
+        AOF aof(aof_file, AofFsync::Always);
+        ASSERT_TRUE(aof.open());
+        aof.log_command({"SET", "k1", "v1"});
+        aof.log_command({"SET", "k2", "v2"});
+        aof.close();
+    }
+
+    // Append partial truncated RESP command "*3\r\n$3\r\nSET\r\n$2\r\nk3\r\n$5\r\n"
+    {
+        std::ofstream out(aof_file, std::ios::app | std::ios::binary);
+        out << "*3\r\n$3\r\nSET\r\n$2\r\nk3\r\n$5\r\nincom"; // Cut off mid-payload
+        out.close();
+    }
+
+    // 2. Replay into a fresh store - should succeed and recover all complete prior commands
+    {
+        Store store;
+        AOF aof(aof_file, AofFsync::EverySec);
+        ASSERT_TRUE(aof.load_into(store));
+
+        Database& db = store.get_db(0);
+        ASSERT_TRUE(db.exists("k1"));
+        ASSERT_TRUE(db.exists("k2"));
+        ASSERT_FALSE(db.exists("k3"));
+        ASSERT_EQ(db.get("k1")->get_string_value(), "v1");
+        ASSERT_EQ(db.get("k2")->get_string_value(), "v2");
+    }
+
+    if (std::filesystem::exists(aof_file)) {
+        std::filesystem::remove(aof_file);
+    }
+}

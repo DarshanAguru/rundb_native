@@ -55,3 +55,29 @@ TEST_CASE("Config_InvalidArgumentsThrow") {
 
     ASSERT_THROWS(ArgParse::parse(argc, argv), std::runtime_error);
 }
+
+TEST_CASE("Config_AofEnabledStandaloneFlag") {
+    // 1. Standalone flag without following value
+    char prog[] = "rundb";
+    char aof_flag[] = "--aof-enabled";
+    char* argv1[] = {prog, aof_flag};
+    Args args1 = ArgParse::parse(2, argv1);
+    ASSERT_TRUE(args1.aof_enabled);
+    ASSERT_TRUE(args1.has_aof_enabled);
+
+    // 2. Standalone flag followed by another option
+    char port_flag[] = "--port";
+    char port_val[] = "6379";
+    char* argv2[] = {prog, aof_flag, port_flag, port_val};
+    Args args2 = ArgParse::parse(4, argv2);
+    ASSERT_TRUE(args2.aof_enabled);
+    ASSERT_TRUE(args2.has_aof_enabled);
+    ASSERT_EQ(args2.port, 6379);
+
+    // 3. Flag with explicit "no"
+    char no_val[] = "no";
+    char* argv3[] = {prog, aof_flag, no_val};
+    Args args3 = ArgParse::parse(3, argv3);
+    ASSERT_FALSE(args3.aof_enabled);
+    ASSERT_TRUE(args3.has_aof_enabled);
+}

@@ -56,6 +56,7 @@ public:
     [[nodiscard]] EvictionPolicy get_eviction_policy() const noexcept { return m_policy; }
 
     void attach_aof(std::shared_ptr<AOF> aof) { m_aof = std::move(aof); }
+    void detach_aof() noexcept { m_aof.reset(); }
     [[nodiscard]] std::shared_ptr<AOF> get_aof() const noexcept { return m_aof; }
 
 private:

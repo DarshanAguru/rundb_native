@@ -48,9 +48,9 @@ enum class ObjectEncoding : uint8_t {
  */
 class RunDBObject {
 public:
-    using StringData   = std::string;
+    using StringData   = internals::SDS;
     using ListData     = internals::QuickList;
-    using HashSetData  = std::unordered_set<std::string>;
+    using HashSetData  = std::unordered_set<internals::SDS, internals::TransparentSDSHash, internals::TransparentSDSEqual>;
     using IntSetData   = internals::IntSet;
 
     using ValueVariant = std::variant<
@@ -84,6 +84,8 @@ public:
     // Value accessors
     [[nodiscard]] std::string get_string_value() const;
     [[nodiscard]] std::string_view get_string_view() const noexcept;
+    [[nodiscard]] const internals::SDS* get_sds() const noexcept;
+    [[nodiscard]] internals::SDS* get_sds() noexcept;
     [[nodiscard]] int64_t get_int_value() const;
     [[nodiscard]] ListData* get_list() noexcept;
     [[nodiscard]] const ListData* get_list() const noexcept;

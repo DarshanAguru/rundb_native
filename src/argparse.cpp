@@ -42,8 +42,8 @@ OPTIONS:
     --aof-file <PATH>
         Append-Only File path. (Default: appendonly.aof)
 
-    --aof-enabled <yes|no|true|false|1|0>
-        Enable Append-Only File persistence. (Default: no)
+    --aof-enabled [yes|no]
+        Enable Append-Only File persistence. The flag alone is sufficient. (Default: no)
 
     --aof-fsync <always|everysec|no>
         AOF fsync policy. (Default: everysec)
@@ -66,7 +66,7 @@ OPTIONS:
 EXAMPLES:
     rundb --port 6379
     rundb --host 0.0.0.0 --port 7379 --memory-limit 104857600
-    rundb --aof-enabled yes --aof-file appendonly.aof
+    rundb --aof-enabled --aof-file appendonly.aof
 
 )";
 }
@@ -108,10 +108,22 @@ Args ArgParse::parse(int argc, char* argv[]) {
         } else if (arg == "--aof-file" && i + 1 < argc) {
             args.aof_file = argv[++i];
             args.has_aof_file = true;
-        } else if (arg == "--aof-enabled" && i + 1 < argc) {
-            std::string val = argv[++i];
-            args.aof_enabled = (val == "yes" || val == "true" || val == "1");
+        } else if (arg == "--aof-enabled") {
             args.has_aof_enabled = true;
+            if (i + 1 < argc) {
+                std::string next_val = argv[i + 1];
+                if (next_val == "yes" || next_val == "true" || next_val == "1") {
+                    args.aof_enabled = true;
+                    ++i;
+                } else if (next_val == "no" || next_val == "false" || next_val == "0") {
+                    args.aof_enabled = false;
+                    ++i;
+                } else {
+                    args.aof_enabled = true;
+                }
+            } else {
+                args.aof_enabled = true;
+            }
         } else if (arg == "--aof-fsync" && i + 1 < argc) {
             args.aof_fsync = argv[++i];
             args.has_aof_fsync = true;
