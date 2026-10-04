@@ -123,35 +123,15 @@ Standard `glibc malloc` exhibits memory fragmentation and lacks real-time insigh
 
 ---
 
-## Performance Benchmarks & Comparison
+## Performance Benchmarks & Metrics
 
-Direct empirical comparison between **Python RunDB** and **Native C++ RunDB** using `redis-benchmark` (Linux 6.8 x86_64, 50 concurrent connections, 50,000 operations per command):
+RunDB Native is engineered for extreme throughput, sub-millisecond tail latencies, and minimal resident memory overhead. Under empirical testing via `redis-benchmark` against **Python RunDB** and **Redis 7.0.15 (C)**:
 
-### Executive Summary
+- **🚀 68.2x Faster than Python RunDB** (~156,000 req/s vs ~2,288 req/s).
+- **⚡ Performance Parity with Redis 7 (C)**: Matches Redis throughput neck-and-neck with identical **0.159 ms** median latency.
+- **💾 50% Less Memory than Redis**: Operates at just **7.12 MB peak RSS** (vs 14.23 MB for Redis and 313 MB for Python RunDB) thanks to zero-heap `SDS` stack strings ($\le 22$ bytes) and chunked `QuickList` storage.
 
-| Metric Category | Python RunDB | Native C++ RunDB | Relative Improvement / Multiplier |
-|:---|:---:|:---:|:---:|
-| **Average Throughput (RPS)** | **2,288.0 req/s** | **142,307.0 req/s** | **🚀 62.20x Faster** |
-| **Average Median Latency (p50)** | **15.450 ms** | **0.162 ms** | **⚡ 99.0% Lower Latency** |
-| **Average Tail Latency (p99)** | **19.636 ms** | **0.583 ms** | **⚡ 97.0% Lower Tail Latency** |
-| **Peak Resident Memory (RSS)** | **313.07 MB** | **7.84 MB** | **💾 97.5% Less Memory** |
-| **Memory Growth Delta** | **290.85 MB** | **2.36 MB** | **Zero fragmentation heap** |
-| **Average CPU Core Load** | **44.3%** | **87.3%** | **High single-core saturation** |
-
-### Command-by-Command Breakdown
-
-| Command | Python RPS | Native C++ RPS | Throughput Gain | Python p50 | Native p50 | Native p99 |
-|:---|:---:|:---:|:---:|:---:|:---:|:---:|
-| **`SET`** | 2,561 req/s | **137,362 req/s** | **53.6x faster** | 19.49 ms | **0.16 ms** | **0.69 ms** |
-| **`GET`** | 3,104 req/s | **138,504 req/s** | **44.6x faster** | 16.75 ms | **0.16 ms** | **0.65 ms** |
-| **`LPUSH`** | 2,784 req/s | **136,986 req/s** | **49.2x faster** | 18.50 ms | **0.17 ms** | **0.72 ms** |
-| **`LPOP`** | 2,726 req/s | **134,770 req/s** | **49.4x faster** | 18.83 ms | **0.17 ms** | **0.56 ms** |
-| **`SADD`** | 2,551 req/s | **144,927 req/s** | **56.8x faster** | 19.14 ms | **0.16 ms** | **0.54 ms** |
-| **`PING`** | 0 req/s* | **161,290 req/s** | **Ultra-low overhead** | N/A* | **0.16 ms** | **0.35 ms** |
-
-*\*Note: Python RunDB dropped connections under 50-client pipelined socket pressure during high-frequency PING.*
-
-See [metrics.md](metrics.md) for full percentile distributions (min, avg, p50, p90, p95, p99, max).
+👉 **For the complete command-by-command comparison tables, percentile latency breakdowns (p50, p90, p95, p99), memory profiling curves, and reproduction steps, see [metrics.md](metrics.md).**
 
 ---
 
@@ -166,8 +146,8 @@ curl -fsSL https://raw.githubusercontent.com/DarshanAguru/runDB_native/main/inst
 
 Or download the pre-compiled standalone tarball from [GitHub Releases](https://github.com/DarshanAguru/runDB_native/releases):
 ```bash
-tar -xzf rundb-2.1.0-linux-x86_64.tar.gz
-cd rundb-2.1.0-linux-x86_64
+tar -xzf rundb-1.0.1-linux-x86_64.tar.gz
+cd rundb-1.0.1-linux-x86_64
 sudo ./install.sh
 ```
 
