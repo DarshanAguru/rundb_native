@@ -151,11 +151,11 @@ public:
         }
 
         if (!has_samples) {
-            return "Dave, no latency spikes were detected!\n";
+            return "No latency spikes were detected!\n";
         }
 
         std::ostringstream oss;
-        oss << "Dave, the following latency events were analyzed:\n\n";
+        oss << "The following latency events were analyzed:\n\n";
         for (const auto& [name, entry] : m_events) {
             if (entry.samples.empty()) continue;
             uint64_t sum = 0;
