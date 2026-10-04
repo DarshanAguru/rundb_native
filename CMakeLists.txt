@@ -99,7 +99,7 @@ if(EXISTS "${BUNDLED_JEMALLOC}")
     target_compile_definitions(rundb_core PUBLIC RUNDB_USE_JEMALLOC=1)
 
     install(
-        FILES "${BUNDLED_JEMALLOC}"
+        FILES "${BUNDLED_JEMALLOC}" "${PROJECT_SOURCE_DIR}/lib/libjemalloc.so.2"
         DESTINATION ${CMAKE_INSTALL_LIBDIR}
     )
 else()
@@ -136,16 +136,6 @@ target_compile_options(rundb
         $<$<CONFIG:Release>:-O3 -march=native -fno-omit-frame-pointer>
         $<$<CONFIG:Debug>:-O0 -g3>
 )
-
-# Copy libjemalloc.so next to the target executable upon successful build
-if(EXISTS "${BUNDLED_JEMALLOC}")
-    add_custom_command(TARGET rundb POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${BUNDLED_JEMALLOC}"
-            "$<TARGET_FILE_DIR:rundb>/libjemalloc.so"
-        COMMENT "Copying bundled libjemalloc.so to output directory"
-    )
-endif()
 
 # --------------------------------------------------
 # Native C++ Unit & Integration Tests Target
@@ -218,6 +208,21 @@ target_compile_options(rundb_benchmark
         $<$<CONFIG:Release>:-O3 -march=native -fno-omit-frame-pointer>
         $<$<CONFIG:Debug>:-O0 -g3>
 )
+
+# Copy libjemalloc.so and libjemalloc.so.2 next to target executables upon successful build
+if(EXISTS "${BUNDLED_JEMALLOC}")
+    foreach(_target rundb rundb_tests rundb_benchmark)
+        add_custom_command(TARGET ${_target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${BUNDLED_JEMALLOC}"
+                "$<TARGET_FILE_DIR:${_target}>/libjemalloc.so"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${BUNDLED_JEMALLOC}"
+                "$<TARGET_FILE_DIR:${_target}>/libjemalloc.so.2"
+            COMMENT "Copying bundled libjemalloc.so & libjemalloc.so.2 for ${_target}"
+        )
+    endforeach()
+endif()
 
 # --------------------------------------------------
 # Installation Rules

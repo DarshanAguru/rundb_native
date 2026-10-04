@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Tag / Release version (e.g. v1.0.0)'
+        description: 'Tag / Release version (e.g. v1.0.1)'
         required: false
-        default: 'v1.0.0'
+        default: 'v1.0.1'
 
 permissions:
   contents: write
@@ -30,7 +30,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential cmake ninja-build git curl pkg-config \
-            zip unzip tar zlib1g-dev
+            zip unzip tar zlib1g-dev libjemalloc-dev
 
       - name: Setup vcpkg Cache
         uses: actions/cache@v4
@@ -75,6 +75,7 @@ jobs:
           elif [ -f lib/libjemalloc.so ]; then
             cp lib/libjemalloc.so "${DIST_DIR}/lib/"
           fi
+          (cd "${DIST_DIR}/lib" && ln -sf libjemalloc.so libjemalloc.so.2)
           
           cp config/rundb.conf "${DIST_DIR}/config/"
           cp README.md LICENSE "${DIST_DIR}/"
@@ -91,6 +92,8 @@ jobs:
           sudo install -m 755 bin/rundb_tests "${PREFIX}/bin/rundb_tests"
           if [ -f lib/libjemalloc.so ]; then
             sudo install -m 755 lib/libjemalloc.so "${PREFIX}/lib/libjemalloc.so"
+            sudo ln -sf libjemalloc.so "${PREFIX}/lib/libjemalloc.so.2"
+            sudo ldconfig 2>/dev/null || true
           fi
           sudo install -m 644 config/rundb.conf "${PREFIX}/etc/rundb/rundb.conf"
           echo "🎉 RunDB Native successfully installed to ${PREFIX}/bin/rundb!"

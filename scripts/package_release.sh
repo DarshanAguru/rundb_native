@@ -20,7 +20,13 @@ mkdir -p "${DIST_DIR}/bin" "${DIST_DIR}/lib" "${DIST_DIR}/config"
 cp build/release/rundb "${DIST_DIR}/bin/rundb"
 cp build/release/rundb_benchmark "${DIST_DIR}/bin/rundb_benchmark"
 cp build/release/rundb_tests "${DIST_DIR}/bin/rundb_tests"
-cp build/release/libjemalloc.so "${DIST_DIR}/lib/libjemalloc.so"
+if [ -f build/release/libjemalloc.so ]; then
+    cp build/release/libjemalloc.so "${DIST_DIR}/lib/libjemalloc.so"
+elif [ -f lib/libjemalloc.so ]; then
+    cp lib/libjemalloc.so "${DIST_DIR}/lib/libjemalloc.so"
+fi
+(cd "${DIST_DIR}/lib" && ln -sf libjemalloc.so libjemalloc.so.2)
+
 cp config/rundb.conf "${DIST_DIR}/config/rundb.conf"
 cp LICENSE "${DIST_DIR}/"
 cp README.md "${DIST_DIR}/"
@@ -34,7 +40,11 @@ echo "Installing RunDB Native to ${PREFIX}..."
 sudo install -d "${PREFIX}/bin" "${PREFIX}/lib" "${PREFIX}/etc/rundb"
 sudo install -m 755 bin/rundb "${PREFIX}/bin/rundb"
 sudo install -m 755 bin/rundb_benchmark "${PREFIX}/bin/rundb_benchmark"
-sudo install -m 755 lib/libjemalloc.so "${PREFIX}/lib/libjemalloc.so"
+if [ -f lib/libjemalloc.so ]; then
+    sudo install -m 755 lib/libjemalloc.so "${PREFIX}/lib/libjemalloc.so"
+    sudo ln -sf libjemalloc.so "${PREFIX}/lib/libjemalloc.so.2"
+    sudo ldconfig 2>/dev/null || true
+fi
 sudo install -m 644 config/rundb.conf "${PREFIX}/etc/rundb/rundb.conf"
 echo "RunDB Native successfully installed to ${PREFIX}/bin/rundb!"
 echo "Run with: rundb --config ${PREFIX}/etc/rundb/rundb.conf"

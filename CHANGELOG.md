@@ -5,7 +5,22 @@ All notable changes to **RunDB** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.1.0] - 2026-10-04
+## [1.0.1] - 2026-10-04
+
+### Fixed & Hardened
+- **Dynamic Linker Portability (`libjemalloc.so.2`)**:
+  - Resolved `error while loading shared libraries: libjemalloc.so.2` by embedding explicit SONAME-compatible symlinks (`libjemalloc.so.2`) directly into `./lib/` and distribution archives.
+  - Configured CMake to automatically copy both `libjemalloc.so` and `libjemalloc.so.2` next to all target executables (`rundb`, `rundb_tests`, `rundb_benchmark`).
+  - Added system `libjemalloc-dev` and post-install `ldconfig` fallback hooks to distribution installer (`install.sh`) and GitHub Actions runner.
+- **Workflow Automation & Dispatch**:
+  - Added `workflow_dispatch` trigger to GitHub Actions with customizable release tag input.
+
+### Optimized
+- **Zero-Allocation Write Command Detection**:
+  - Replaced heap-allocated strings and `std::unordered_set<std::string>` lookups in `Store::process_command` with an in-place stack-buffered zero-allocation string_view matcher.
+  - Eliminated unnecessary command checking when neither AOF nor Snapshots are active.
+
+## [1.0.0] - 2026-10-04
 
 ### Added
 - **Point-in-Time Compressed Snapshot Persistence (RDB Engine)**:

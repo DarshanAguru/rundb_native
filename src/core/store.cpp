@@ -66,6 +66,24 @@ const Database& Store::get_db(int db_id) const {
     return m_databases[static_cast<size_t>(db_id)];
 }
 
+static bool is_write_cmd(std::string_view raw) noexcept {
+    char buf[16];
+    if (raw.size() >= sizeof(buf)) return false;
+    for (size_t i = 0; i < raw.size(); ++i) {
+        char c = raw[i];
+        if (c >= 'a' && c <= 'z') c -= ('a' - 'A');
+        buf[i] = c;
+    }
+    std::string_view cmd(buf, raw.size());
+    return cmd == "SET" || cmd == "MSET" || cmd == "INCR" || cmd == "DECR" ||
+           cmd == "INCRBY" || cmd == "DECRBY" || cmd == "APPEND" ||
+           cmd == "LPUSH" || cmd == "RPUSH" || cmd == "LPOP" || cmd == "RPOP" ||
+           cmd == "SADD" || cmd == "SREM" || cmd == "DEL" ||
+           cmd == "FLUSHDB" || cmd == "FLUSHALL" ||
+           cmd == "EXPIRE" || cmd == "PEXPIRE" || cmd == "EXPIREAT" || cmd == "PEXPIREAT" ||
+           cmd == "PERSIST" || cmd == "SELECT";
+}
+
 std::string Store::process_command(ClientContext& ctx, const std::vector<std::string>& tokens) {
     if (tokens.empty()) return "-ERR empty command\r\n";
 
@@ -79,19 +97,8 @@ std::string Store::process_command(ClientContext& ctx, const std::vector<std::st
     std::string resp = Evaluator::evaluate(*this, ctx, tokens);
 
     // If write command and AOF or Snapshot attached and not in transaction queue, notify
-    if (!ctx.in_transaction && !tokens.empty()) {
-        std::string cmd = tokens[0];
-        for (char& c : cmd) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-
-        static const std::unordered_set<std::string> WRITE_CMDS = {
-            "SET", "MSET", "INCR", "DECR", "INCRBY", "DECRBY", "APPEND",
-            "LPUSH", "RPUSH", "LPOP", "RPOP",
-            "SADD", "SREM",
-            "DEL", "FLUSHDB", "FLUSHALL", "EXPIRE", "PEXPIRE", "EXPIREAT", "PEXPIREAT", "PERSIST",
-            "SELECT"
-        };
-
-        if (WRITE_CMDS.find(cmd) != WRITE_CMDS.end()) {
+    if (!ctx.in_transaction && ((m_aof && m_aof->is_enabled()) || m_snapshot_mgr)) {
+        if (!tokens.empty() && is_write_cmd(tokens[0])) {
             if (m_aof && m_aof->is_enabled()) {
                 m_aof->log_command(tokens);
             }
