@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag / Release version (e.g. v1.0.0)'
+        required: false
+        default: 'v1.0.0'
 
 permissions:
   contents: write
@@ -52,7 +58,8 @@ jobs:
 
       - name: Package Release Tarball
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          RAW_TAG="${{ github.event.inputs.tag_name || github.ref_name }}"
+          VERSION="${RAW_TAG#v}"
           ARCH="$(uname -m)"
           PACKAGE_NAME="rundb-${VERSION}-linux-${ARCH}"
           DIST_DIR="dist/${PACKAGE_NAME}"
@@ -62,7 +69,13 @@ jobs:
           cp build/release/rundb "${DIST_DIR}/bin/"
           cp build/release/rundb_benchmark "${DIST_DIR}/bin/"
           cp build/release/rundb_tests "${DIST_DIR}/bin/"
-          cp build/release/libjemalloc.so "${DIST_DIR}/lib/"
+          
+          if [ -f build/release/libjemalloc.so ]; then
+            cp build/release/libjemalloc.so "${DIST_DIR}/lib/"
+          elif [ -f lib/libjemalloc.so ]; then
+            cp lib/libjemalloc.so "${DIST_DIR}/lib/"
+          fi
+          
           cp config/rundb.conf "${DIST_DIR}/config/"
           cp README.md LICENSE "${DIST_DIR}/"
           
@@ -76,7 +89,9 @@ jobs:
           sudo install -m 755 bin/rundb "${PREFIX}/bin/rundb"
           sudo install -m 755 bin/rundb_benchmark "${PREFIX}/bin/rundb_benchmark"
           sudo install -m 755 bin/rundb_tests "${PREFIX}/bin/rundb_tests"
-          sudo install -m 755 lib/libjemalloc.so "${PREFIX}/lib/libjemalloc.so"
+          if [ -f lib/libjemalloc.so ]; then
+            sudo install -m 755 lib/libjemalloc.so "${PREFIX}/lib/libjemalloc.so"
+          fi
           sudo install -m 644 config/rundb.conf "${PREFIX}/etc/rundb/rundb.conf"
           echo "🎉 RunDB Native successfully installed to ${PREFIX}/bin/rundb!"
           echo "Try running: rundb --port 7379"
@@ -89,6 +104,7 @@ jobs:
       - name: Publish to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
           files: |
             dist/*.tar.gz
             dist/*.sha256

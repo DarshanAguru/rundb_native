@@ -64,18 +64,6 @@ data/
 *.pid
 rundb.pid
 
-# Python & Testing artifacts (scripts/ & tests/)
-__pycache__/
-*.py[cod]
-*$py.class
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.coverage
-htmlcov/
-.venv/
-venv/
-env/
 
 # IDE & Editor configurations
 .vscode/
