@@ -14,12 +14,12 @@ uint64_t Database::now_ms() noexcept {
 
 void Database::set(std::string_view key, ObjectPtr val) {
     if (!m_expires.empty()) {
-        auto exp_it = m_expires.find(key);
+        auto exp_it = m_expires.find(std::string(key));
         if (exp_it != m_expires.end()) {
             m_expires.erase(exp_it);
         }
     }
-    auto it = m_dict.find(key);
+    auto it = m_dict.find(std::string(key));
     if (it != m_dict.end()) {
         it->second = std::move(val);
     } else {
@@ -32,7 +32,7 @@ ObjectPtr Database::get(std::string_view key) {
         del(key);
         return nullptr;
     }
-    auto it = m_dict.find(key);
+    auto it = m_dict.find(std::string(key));
     if (it != m_dict.end()) {
         it->second->update_lru();
         return it->second;
@@ -45,7 +45,7 @@ ObjectPtr Database::get_no_touch(std::string_view key) {
         del(key);
         return nullptr;
     }
-    auto it = m_dict.find(key);
+    auto it = m_dict.find(std::string(key));
     if (it != m_dict.end()) {
         return it->second;
     }
@@ -54,12 +54,12 @@ ObjectPtr Database::get_no_touch(std::string_view key) {
 
 bool Database::del(std::string_view key) {
     if (!m_expires.empty()) {
-        auto exp_it = m_expires.find(key);
+        auto exp_it = m_expires.find(std::string(key));
         if (exp_it != m_expires.end()) {
             m_expires.erase(exp_it);
         }
     }
-    auto it = m_dict.find(key);
+    auto it = m_dict.find(std::string(key));
     if (it != m_dict.end()) {
         m_dict.erase(it);
         return true;
@@ -77,9 +77,9 @@ void Database::flush() noexcept {
 }
 
 bool Database::set_expire(std::string_view key, uint64_t expire_time_ms) {
-    auto it = m_dict.find(key);
+    auto it = m_dict.find(std::string(key));
     if (it == m_dict.end()) return false;
-    auto exp_it = m_expires.find(key);
+    auto exp_it = m_expires.find(std::string(key));
     if (exp_it != m_expires.end()) {
         exp_it->second = expire_time_ms;
     } else {
@@ -90,7 +90,7 @@ bool Database::set_expire(std::string_view key, uint64_t expire_time_ms) {
 
 bool Database::persist(std::string_view key) {
     if (m_expires.empty()) return false;
-    auto it = m_expires.find(key);
+    auto it = m_expires.find(std::string(key));
     if (it != m_expires.end()) {
         m_expires.erase(it);
         return true;
@@ -99,11 +99,11 @@ bool Database::persist(std::string_view key) {
 }
 
 int64_t Database::get_ttl_ms(std::string_view key) {
-    auto it = m_dict.find(key);
+    auto it = m_dict.find(std::string(key));
     if (it == m_dict.end()) return -2; // Key does not exist
 
     if (m_expires.empty()) return -1; // Key exists but has no associated expire
-    auto exp_it = m_expires.find(key);
+    auto exp_it = m_expires.find(std::string(key));
     if (exp_it == m_expires.end()) return -1;
 
     uint64_t current = now_ms();
@@ -114,9 +114,23 @@ int64_t Database::get_ttl_ms(std::string_view key) {
     return static_cast<int64_t>(exp_it->second - current);
 }
 
+int64_t Database::get_ttl_ms_const(std::string_view key, uint64_t current) const {
+    auto it = m_dict.find(std::string(key));
+    if (it == m_dict.end()) return -2; // Key does not exist
+
+    if (m_expires.empty()) return -1; // Key exists but has no associated expire
+    auto exp_it = m_expires.find(std::string(key));
+    if (exp_it == m_expires.end()) return -1;
+
+    if (exp_it->second <= current) {
+        return -2; // Expired
+    }
+    return static_cast<int64_t>(exp_it->second - current);
+}
+
 bool Database::is_expired(std::string_view key) {
     if (m_expires.empty()) return false;
-    auto it = m_expires.find(key);
+    auto it = m_expires.find(std::string(key));
     if (it == m_expires.end()) return false;
     return it->second <= now_ms();
 }

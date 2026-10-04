@@ -12,6 +12,14 @@ services:
     environment:
       - RUNDB_PORT=7379
       - RUNDB_HOST=0.0.0.0
+      - RUNDB_LOG_LEVEL=INFO
+      - RUNDB_AOF_ENABLED=yes
+      - RUNDB_AOF_FILE=/data/run_master.aof
+      - RUNDB_AOF_FSYNC=everysec
+      - RUNDB_SNAPSHOT_INTERVAL=1M
+      - RUNDB_SNAPSHOT_FILE=/data/dump.rdb
+      - RUNDB_MEMORY_LIMIT=0
+      - RUNDB_EVICTION_STRATEGY=noeviction
     security_opt:
       - no-new-privileges:true
     cap_drop:

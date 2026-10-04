@@ -41,6 +41,7 @@ public:
     bool set_expire(std::string_view key, uint64_t expire_time_ms);
     bool persist(std::string_view key);
     [[nodiscard]] int64_t get_ttl_ms(std::string_view key);
+    [[nodiscard]] int64_t get_ttl_ms_const(std::string_view key, uint64_t current_time_ms) const;
     [[nodiscard]] bool is_expired(std::string_view key);
 
     // Eviction & sampling

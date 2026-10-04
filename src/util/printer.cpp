@@ -1,4 +1,5 @@
 #include "util/printer.hpp"
+#include "version.hpp"
 
 #include <cmath>
 #include <iomanip>
@@ -50,7 +51,7 @@ namespace rundb {
 )" << Colors::END;
 
         std::cout << "        " << Colors::BOLD << "RUNDB: The Redis-inspired NoSQL Key-Value Store (Native C++20)\n"
-                  << "        " << Colors::GREEN << "Version 0.1.0 - Built with ❤️  by Darshan\n\n" << Colors::END;
+                  << "        " << Colors::GREEN << "Version " << rundb::VERSION << " - Built with ❤️  by Darshan\n\n" << Colors::END;
 
         std::string line1_text = "  Server is running at " + host + ":" + std::to_string(port);
         std::string line2_text = "  Try running: redis-cli -p " + std::to_string(port);

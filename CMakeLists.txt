@@ -1,8 +1,16 @@
 cmake_minimum_required(VERSION 3.25)
 
+# Read version automatically from include/version.hpp (Single Source of Truth)
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/include/version.hpp" _version_line REGEX "inline constexpr std::string_view VERSION = \"([0-9]+\\.[0-9]+\\.[0-9]+)\";")
+if(_version_line MATCHES "\"([0-9]+\\.[0-9]+\\.[0-9]+)\"")
+    set(RUNDB_VERSION_STRING "${CMAKE_MATCH_1}")
+else()
+    set(RUNDB_VERSION_STRING "0.1.0")
+endif()
+
 project(
     rundb
-    VERSION 0.1.0
+    VERSION ${RUNDB_VERSION_STRING}
     DESCRIPTION "Redis-inspired in-memory database written in modern C++"
     LANGUAGES CXX
 )
@@ -33,6 +41,7 @@ set(CMAKE_INSTALL_RPATH "\$ORIGIN;\$ORIGIN/../lib")
 # --------------------------------------------------
 
 find_package(quill CONFIG REQUIRED)
+find_package(ZLIB REQUIRED)
 
 # --------------------------------------------------
 # Core Library Target (Reusable by Server, Tests, Benchmarks)
@@ -54,6 +63,7 @@ add_library(rundb_core STATIC
     src/core/expiration.cpp
     src/core/stats.cpp
     src/core/aof.cpp
+    src/core/snapshot.cpp
     src/core/evaluator.cpp
     src/core/store.cpp
     src/server/client.cpp
@@ -72,6 +82,7 @@ target_include_directories(rundb_core
 target_link_libraries(rundb_core
     PUBLIC
         quill::quill
+        ZLIB::ZLIB
 )
 
 set(BUNDLED_JEMALLOC "${PROJECT_SOURCE_DIR}/lib/libjemalloc.so")
@@ -154,6 +165,7 @@ add_executable(rundb_tests
     tests/test_eviction.cpp
     tests/test_evaluator.cpp
     tests/test_aof.cpp
+    tests/test_snapshot.cpp
     tests/test_config.cpp
     tests/test_network.cpp
 )

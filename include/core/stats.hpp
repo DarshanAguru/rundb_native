@@ -42,6 +42,13 @@ public:
     [[nodiscard]] uint64_t keyspace_hits() const noexcept { return m_hits; }
     [[nodiscard]] uint64_t keyspace_misses() const noexcept { return m_misses; }
 
+    void reset_stats() noexcept {
+        m_connections = 0;
+        m_commands = 0;
+        m_hits = 0;
+        m_misses = 0;
+    }
+
     [[nodiscard]] MemoryStats get_memory_stats(size_t max_memory) const noexcept;
     [[nodiscard]] std::vector<DBStats> get_keyspace_stats(const std::vector<Database>& databases) const;
 

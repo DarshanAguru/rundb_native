@@ -4,6 +4,7 @@
 #include "syscheck.hpp"
 #include "core/store.hpp"
 #include "core/aof.hpp"
+#include "core/snapshot.hpp"
 #include "server/server.hpp"
 #include "util/printer.hpp"
 
@@ -60,17 +61,33 @@ int main(int argc, char* argv[]) {
     try {
         auto policy = rundb::core::Eviction::parse_policy(opts.eviction_strategy);
         rundb::core::Store store(opts.memory_limit, policy, opts.db_count);
+        store.set_config(opts);
 
-        // AOF Persistence Integration
+        // Snapshot Persistence Integration
+        auto snapshot_mgr = std::make_shared<rundb::core::SnapshotManager>(
+            opts.snapshot_file, opts.snapshot_interval_sec
+        );
+        store.attach_snapshot_manager(snapshot_mgr);
+
+        // Point-in-time recovery on startup:
+        bool recovered = false;
         if (opts.aof_enabled) {
             auto fsync_p = rundb::core::AOF::parse_fsync(opts.aof_fsync);
             auto aof = std::make_shared<rundb::core::AOF>(opts.aof_file, fsync_p);
             // Replay existing AOF state on boot
-            aof->load_into(store);
+            if (aof->load_into(store)) {
+                recovered = true;
+            }
             if (aof->open()) {
                 store.attach_aof(aof);
                 INFO(MAIN, "AOF persistence active on {}", opts.aof_file);
             }
+        }
+
+        // If AOF didn't load keys (e.g. --no-aof, or AOF empty/missing), check snapshot dump
+        if (!recovered && snapshot_mgr->exists()) {
+            size_t restored = snapshot_mgr->load_into(store);
+            INFO(MAIN, "Point-in-time recovery: Restored {} keys from snapshot {}", restored, opts.snapshot_file);
         }
 
         rundb::server::Server server(opts.host, opts.port, store);

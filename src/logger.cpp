@@ -33,6 +33,10 @@ namespace rundb {
 
         quill::LogLevel log_level = quill::LogLevel::Info;
 
+        for (char& c : level_str) {
+            c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        }
+
         if (!level_str.empty()) {
             std::string_view value(level_str);
             if (value == "TRACE") {

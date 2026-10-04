@@ -10,10 +10,12 @@
 #include "core/expiration.hpp"
 #include "core/stats.hpp"
 #include "core/client_context.hpp"
+#include "argparse.hpp"
 
 namespace rundb::core {
 
 class AOF;
+class SnapshotManager;
 
 /**
  * @brief Multi-database storage coordinator managing 16 isolated keyspace partitions,
@@ -50,14 +52,28 @@ public:
     size_t perform_eviction_slow();
 
     // Configuration & persistence
-    void set_maxmemory(size_t maxmem) noexcept { m_maxmemory = maxmem; }
+    void set_maxmemory(size_t maxmem) noexcept;
     [[nodiscard]] size_t get_maxmemory() const noexcept { return m_maxmemory; }
-    void set_eviction_policy(EvictionPolicy policy) noexcept { m_policy = policy; }
+    void set_eviction_policy(EvictionPolicy policy) noexcept;
     [[nodiscard]] EvictionPolicy get_eviction_policy() const noexcept { return m_policy; }
+
+    void set_config(const rundb::Args& cfg) { m_config = cfg; }
+    [[nodiscard]] const rundb::Args& get_config() const noexcept { return m_config; }
+    [[nodiscard]] rundb::Args& get_config() noexcept { return m_config; }
 
     void attach_aof(std::shared_ptr<AOF> aof) { m_aof = std::move(aof); }
     void detach_aof() noexcept { m_aof.reset(); }
     [[nodiscard]] std::shared_ptr<AOF> get_aof() const noexcept { return m_aof; }
+
+    void attach_snapshot_manager(std::shared_ptr<SnapshotManager> mgr) { m_snapshot_mgr = std::move(mgr); }
+    void detach_snapshot_manager() noexcept { m_snapshot_mgr.reset(); }
+    [[nodiscard]] std::shared_ptr<SnapshotManager> get_snapshot_manager() const noexcept { return m_snapshot_mgr; }
+
+    // Client tracking for CLIENT commands
+    void register_client(ClientContext* ctx);
+    void unregister_client(ClientContext* ctx);
+    [[nodiscard]] const std::vector<ClientContext*>& get_clients() const noexcept { return m_clients; }
+    bool kill_client(const std::string& target);
 
 private:
     std::vector<Database> m_databases;
@@ -65,6 +81,9 @@ private:
     size_t m_maxmemory{0};
     EvictionPolicy m_policy{EvictionPolicy::NoEviction};
     std::shared_ptr<AOF> m_aof;
+    std::shared_ptr<SnapshotManager> m_snapshot_mgr;
+    rundb::Args m_config;
+    std::vector<ClientContext*> m_clients;
 };
 
 } // namespace rundb::core

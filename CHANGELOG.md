@@ -5,6 +5,32 @@ All notable changes to **RunDB** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-10-04
+
+### Added
+- **Point-in-Time Compressed Snapshot Persistence (RDB Engine)**:
+  - Compressed binary snapshot engine utilizing Zlib DEFLATE with CRC32 data integrity verification.
+  - Asynchronous background snapshots (`BGSAVE`) running on dedicated worker threads with copy-on-write snapshotting semantics and atomic file swapping.
+  - Synchronous `SAVE` command for manual point-in-time exports.
+  - `LASTSAVE` command reporting epoch timestamp of the most recent successful snapshot.
+  - Automated configurable periodic snapshots via `--snapshot`, `--snapshot-interval`, `--save`, and config file (`snapshot_interval`), supporting human-readable time intervals (`30S`, `1M`, `2H`, `1D`).
+  - Seamless dual-mode durability recovery at startup prioritizing compressed snapshots followed by incremental AOF replay.
+- **Redis Administrative & Introspection Ecosystem**:
+  - `COMMAND` command suite: `COMMAND`, `COMMAND COUNT`, `COMMAND DOCS`, `COMMAND INFO` for client autodetection.
+  - `CONFIG` command suite: `CONFIG GET`, `CONFIG SET`, and `CONFIG RESETSTAT` with real-time runtime configuration updates.
+  - `CLIENT` command suite: `CLIENT LIST`, `CLIENT SETNAME`, `CLIENT GETNAME`, `CLIENT ID`, `CLIENT INFO`, `CLIENT KILL`, `CLIENT PAUSE`, and `CLIENT UNPAUSE`.
+  - `LATENCY` command suite: `LATENCY LATEST`, `LATENCY HISTORY`, `LATENCY RESET`, `LATENCY DOCTOR`, and `LATENCY GRAPH` for microsecond-level latency monitoring and telemetry.
+- **Hermetic Docker Packaging & Deployment**:
+  - Multi-stage production `Dockerfile` with automated `vcpkg` bootstrapping and dependency caching.
+  - Pre-bundled production `libjemalloc.so` and runtime `zlib` integration with unprivileged system user (`rundb`).
+  - Production `docker-compose.yml` with persistent data volume mapping (`/data`).
+- **Extended Test Suite**:
+  - Test suite expanded from 57 to **76 native unit and integration tests** with 100% pass rate.
+
+### Changed
+- **AOF Enabled by Default**: AOF logging is now active by default out-of-the-box (`--aof-enabled yes`), with a new `--no-aof` CLI switch to run pure in-memory or snapshot-only workloads.
+- **Hardened Database Concurrency & Safety**: Const-qualified TTL queries (`get_ttl_ms_const`) prevent iterator invalidation during snapshot extraction; atomic state flags prevent data races during background I/O.
+
 ## [2.0.0] - 2026-09-29
 
 ### Added

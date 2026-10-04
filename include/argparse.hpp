@@ -18,13 +18,16 @@ namespace rundb {
         std::size_t max_clients = 10000;                   ///< Max concurrent client connections
         double cron_freq_interval = 0.05;                  ///< Maintenance cron interval in seconds
         std::string aof_file = "appendonly.aof";           ///< AOF log file path
-        bool aof_enabled = false;                          ///< Enable AOF persistence
+        bool aof_enabled = true;                           ///< Enable AOF persistence (default: true)
         std::string aof_fsync = "everysec";                ///< Fsync policy: always, everysec, no
         std::string eviction_strategy = "noeviction";      ///< Eviction strategy: allkeys-lru, volatile-lru, etc.
         double eviction_ratio = 0.1;                       ///< Eviction target ratio
         std::size_t db_count = 16;                         ///< Number of database partitions
         std::size_t eviction_pool_size = 16;               ///< LRU candidate eviction pool size
         std::size_t eviction_sample_size = 5;              ///< Samples picked per eviction pass
+        std::string snapshot_interval_str = "";            ///< Snapshot interval string (e.g. 1M, 60S, 2H)
+        uint64_t snapshot_interval_sec = 0;                ///< Snapshot interval in seconds (0 = disabled)
+        std::string snapshot_file = "dump.rdb";            ///< Snapshot RDB file path (default: dump.rdb)
 
         // CLI explicit flag markers (for strict CLI > Env > Conf precedence)
         bool has_port{false};
@@ -42,6 +45,8 @@ namespace rundb {
         bool has_db_count{false};
         bool has_eviction_pool_size{false};
         bool has_eviction_sample_size{false};
+        bool has_snapshot_interval{false};
+        bool has_snapshot_file{false};
     };
 
     /**

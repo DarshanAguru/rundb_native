@@ -15,7 +15,7 @@ TEST_CASE("Config_DefaultArguments") {
     ASSERT_EQ(args.log_level, "INFO");
     ASSERT_EQ(args.eviction_strategy, "noeviction");
     ASSERT_EQ(args.memory_limit, 0);
-    ASSERT_FALSE(args.aof_enabled);
+    ASSERT_TRUE(args.aof_enabled);
 }
 
 TEST_CASE("Config_ExplicitCLIFlags") {
@@ -80,4 +80,13 @@ TEST_CASE("Config_AofEnabledStandaloneFlag") {
     Args args3 = ArgParse::parse(3, argv3);
     ASSERT_FALSE(args3.aof_enabled);
     ASSERT_TRUE(args3.has_aof_enabled);
+}
+
+TEST_CASE("Config_NoAofFlag") {
+    char prog[] = "rundb";
+    char no_aof_flag[] = "--no-aof";
+    char* argv[] = {prog, no_aof_flag};
+    Args args = ArgParse::parse(2, argv);
+    ASSERT_FALSE(args.aof_enabled);
+    ASSERT_TRUE(args.has_aof_enabled);
 }

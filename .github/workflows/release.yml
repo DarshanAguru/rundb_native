@@ -1,0 +1,97 @@
+name: Release & Binary Distribution
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build & Publish Release Binaries
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build git curl pkg-config \
+            zip unzip tar zlib1g-dev
+
+      - name: Setup vcpkg Cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/vcpkg/archives
+            ${{ github.workspace }}/build/vcpkg_installed
+          key: ${{ runner.os }}-vcpkg-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            ${{ runner.os }}-vcpkg-
+
+      - name: Bootstrap vcpkg
+        run: |
+          git clone --depth 1 https://github.com/microsoft/vcpkg.git /opt/vcpkg
+          /opt/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+          echo "VCPKG_ROOT=/opt/vcpkg" >> $GITHUB_ENV
+
+      - name: Compile Release Binary
+        run: |
+          cmake --preset release
+          cmake --build --preset build-release
+
+      - name: Execute Full Test Suite
+        run: ./build/release/rundb_tests
+
+      - name: Package Release Tarball
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ARCH="$(uname -m)"
+          PACKAGE_NAME="rundb-${VERSION}-linux-${ARCH}"
+          DIST_DIR="dist/${PACKAGE_NAME}"
+          
+          mkdir -p "${DIST_DIR}/bin" "${DIST_DIR}/lib" "${DIST_DIR}/config"
+          
+          cp build/release/rundb "${DIST_DIR}/bin/"
+          cp build/release/rundb_benchmark "${DIST_DIR}/bin/"
+          cp build/release/rundb_tests "${DIST_DIR}/bin/"
+          cp build/release/libjemalloc.so "${DIST_DIR}/lib/"
+          cp config/rundb.conf "${DIST_DIR}/config/"
+          cp README.md LICENSE "${DIST_DIR}/"
+          
+          # Create self-contained installer script inside tarball
+          cat << 'EOF' > "${DIST_DIR}/install.sh"
+          #!/usr/bin/env bash
+          set -e
+          PREFIX="${PREFIX:-/usr/local}"
+          echo "Installing RunDB Native to ${PREFIX}..."
+          sudo install -d "${PREFIX}/bin" "${PREFIX}/lib" "${PREFIX}/etc/rundb"
+          sudo install -m 755 bin/rundb "${PREFIX}/bin/rundb"
+          sudo install -m 755 bin/rundb_benchmark "${PREFIX}/bin/rundb_benchmark"
+          sudo install -m 755 bin/rundb_tests "${PREFIX}/bin/rundb_tests"
+          sudo install -m 755 lib/libjemalloc.so "${PREFIX}/lib/libjemalloc.so"
+          sudo install -m 644 config/rundb.conf "${PREFIX}/etc/rundb/rundb.conf"
+          echo "🎉 RunDB Native successfully installed to ${PREFIX}/bin/rundb!"
+          echo "Try running: rundb --port 7379"
+          EOF
+          chmod +x "${DIST_DIR}/install.sh"
+          
+          tar -czvf "dist/${PACKAGE_NAME}.tar.gz" -C dist "${PACKAGE_NAME}"
+          cd dist && sha256sum "${PACKAGE_NAME}.tar.gz" > "${PACKAGE_NAME}.tar.gz.sha256"
+
+      - name: Publish to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.sha256
+          draft: false
+          prerelease: false
+          generate_release_notes: true

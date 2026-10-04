@@ -31,7 +31,10 @@
 - **📜 Chunked `QuickList`**: Cache-conscious unrolled doubly-linked list packing 32-element contiguous chunks per node, providing $O(1)$ push/pop at both ends with hardware cache prefetching.
 - **⏰ 24-Bit Circular LRU Clock & Eviction Pool**: Approximates global LRU through a 16-candidate bounded eviction pool without pointer overhead.
 - **🎯 Probabilistic Active Expiration**: Evaluates 20 random keys with TTL per database partition, automatically repeating if $> 25\%$ are expired, with a strict 1ms time-budget cap to maintain sub-millisecond p99 latencies.
-- **💾 Append-Only File (AOF) Persistence**: Durability engine supporting `Always`, `EverySec` (1-second periodic background fsync), and `No` sync modes, with seamless startup replay.
+- **💾 Append-Only File (AOF) Persistence**: Enabled by default (`--aof-enabled yes`, `--no-aof` to disable) with configurable fsync (`always`, `everysec`, `no`), transaction safety, and startup replay.
+- **📸 Compressed Point-in-Time Snapshots (RDB)**: High-compression Zlib DEFLATE dumps with CRC32 integrity checks. Supports asynchronous background saving (`BGSAVE`), synchronous saving (`SAVE`), and automated interval-based triggers (`--snapshot 1M`, `30S`, `2H`).
+- **🛠️ Comprehensive Admin & Introspection Suite**: Complete implementations of `COMMAND` (`DOCS`, `INFO`, `COUNT`), `CONFIG` (`GET`, `SET`, `RESETSTAT`), `CLIENT` (`LIST`, `SETNAME`, `GETNAME`, `KILL`, `ID`, `INFO`, `PAUSE`, `UNPAUSE`), and `LATENCY` (`LATEST`, `HISTORY`, `RESET`, `DOCTOR`, `GRAPH`).
+- **🐳 Hermetic Zero-Dependency Container**: Self-contained multi-stage Docker build packaging pre-bundled `jemalloc`, `zlib`, and `quill` via automated `vcpkg` bootstrapping—users never need to manually download or configure external dependencies.
 - **🎨 Interactive Terminal Printer**: Full ANSI color palette, block-font ASCII art banner, boxed network status, dynamic metric scaling (B $\to$ KB $\to$ MB $\to$ GB), and an end-of-run "memory calories burnt" summary.
 
 ---
@@ -56,6 +59,8 @@ runDB_native/
 │   │   ├── expiration.hpp            # Adaptive active key expiration daemon
 │   │   ├── stats.hpp                 # Telemetry (hits, misses, commands, memory)
 │   │   ├── aof.hpp                   # AOF persistence logger and startup replayer
+│   │   ├── snapshot.hpp              # Compressed RDB snapshot engine (Zlib + CRC32)
+│   │   ├── latency.hpp               # Latency monitoring engine (histograms & spike doctor)
 │   │   ├── evaluator.hpp             # Command dispatch & evaluation engine
 │   │   └── store.hpp                 # Multi-DB Store coordinator (SELECT 0..15)
 │   ├── server/
@@ -76,9 +81,9 @@ runDB_native/
 ├── tests/                            # Native C++20 test and benchmarking suite
 │   ├── test_framework.hpp            # Lightweight header-only test runner & assertions
 │   ├── benchmark_main.cpp            # Native C++ benchmarking engine & network suite
-│   └── test_*.cpp                    # Unit & integration tests for all subsystems
-├── Dockerfile                        # Multi-stage production container build
-├── docker-compose.yml                # Docker compose deployment
+│   └── test_*.cpp                    # Unit & integration tests for all subsystems (76 tests)
+├── Dockerfile                        # Multi-stage hermetic production container build
+├── docker-compose.yml                # Docker compose deployment with volume persistence
 └── CMakeLists.txt                    # Modern CMake build system with presets
 ```
 
@@ -152,12 +157,30 @@ See [metrics.md](metrics.md) for full percentile distributions (min, avg, p50, p
 
 ## Quickstart
 
-### Prerequisites
+### 1. Fast Install (Pre-Compiled Binary)
+
+Install directly on Linux using the automated one-liner:
+```bash
+curl -fsSL https://raw.githubusercontent.com/DarshanAguru/runDB_native/main/install.sh | bash
+```
+
+Or download the pre-compiled standalone tarball from [GitHub Releases](https://github.com/DarshanAguru/runDB_native/releases):
+```bash
+tar -xzf rundb-2.1.0-linux-x86_64.tar.gz
+cd rundb-2.1.0-linux-x86_64
+sudo ./install.sh
+```
+
+*(See [process.md](process.md) for full binary packaging and release instructions)*
+
+---
+
+### 2. Build from Source
+
+#### Prerequisites
 - Linux OS (Ubuntu 22.04+, Debian 12+, Arch, Fedora)
 - GCC 13+ or Clang 17+ (with C++20 support)
 - CMake 3.25+ and Ninja
-
-### 1. Build from Source
 
 ```bash
 # Clone the repository
@@ -171,13 +194,13 @@ cmake --build --preset build-release
 
 The resulting binary `./build/release/rundb` will be created with `libjemalloc.so` copied alongside it.
 
-### 2. Run the Server
+### 3. Run the Server
 
 ```bash
 ./build/release/rundb --port 7379
 ```
 
-### 3. Connect with `redis-cli`
+### 4. Connect with `redis-cli`
 
 ```bash
 redis-cli -p 7379 PING
@@ -223,10 +246,31 @@ docker run -d -p 7379:7379 --name rundb-native -v rundb_data:/data rundb-native:
 | `PING [msg]` | Admin | Ping the server; returns PONG or custom message |
 | `ECHO msg` | Admin | Echo back the provided message |
 | `SELECT index` | Admin | Switch active database partition (0..15) |
-| `INFO [section]` | Admin | Server and human-readable memory analytics |
+| `INFO [section]` | Admin | Server, memory, persistence, and client analytics |
 | `DBSIZE` | Admin | Count total keys in active partition |
 | `TIME` | Admin | Current Unix server timestamp |
-| `SET key val [EX sec] [PX ms] [NX|XX]` | Strings | Set key with optional TTL and conditions |
+| `COMMAND [COUNT\|DOCS\|INFO]` | Admin | Introspection catalog for Redis clients and drivers |
+| `CONFIG GET param` | Admin | Query runtime configuration parameter |
+| `CONFIG SET param val` | Admin | Dynamically update configuration parameter |
+| `CONFIG RESETSTAT` | Admin | Reset operational statistics and telemetry counters |
+| `CLIENT LIST` | Admin | Enumerate connected clients with network metrics |
+| `CLIENT SETNAME name` | Admin | Assign human-readable nickname to current client |
+| `CLIENT GETNAME` | Admin | Query nickname assigned to current client |
+| `CLIENT ID` | Admin | Retrieve unique 64-bit client connection ID |
+| `CLIENT INFO` | Admin | Detailed connection state of active client |
+| `CLIENT KILL [ip:port\|ID id]` | Admin | Terminate connected client socket |
+| `CLIENT PAUSE timeout_ms` | Admin | Temporarily suspend command processing |
+| `CLIENT UNPAUSE` | Admin | Resume suspended command processing |
+| `LATENCY LATEST` | Latency | Report highest latency spike for tracked events |
+| `LATENCY HISTORY event` | Latency | Return timestamped spike time-series for event |
+| `LATENCY RESET [event]` | Latency | Reset recorded latency spike records |
+| `LATENCY DOCTOR` | Latency | Automated diagnostic human-readable latency report |
+| `LATENCY GRAPH event` | Latency | Render ASCII sparkline graph of event latencies |
+| `SAVE` | Persistence | Synchronously write compressed snapshot (RDB) to disk |
+| `BGSAVE` | Persistence | Non-blocking asynchronous snapshot dump in background thread |
+| `LASTSAVE` | Persistence | Return UNIX timestamp of last successful snapshot |
+| `BGREWRITEAOF` | Persistence | Background compaction and atomic rewrite of AOF log |
+| `SET key val [EX sec] [PX ms] [NX\|XX]` | Strings | Set key with optional TTL and conditions |
 | `GET key` | Strings | Get value (with passive expiration) |
 | `MSET k1 v1 [k2 v2 ...]` | Strings | Atomically set multiple key-value pairs |
 | `MGET k1 [k2 ...]` | Strings | Retrieve multiple values |
@@ -249,7 +293,9 @@ docker run -d -p 7379:7379 --name rundb-native -v rundb_data:/data rundb-native:
 | `DEL key [key ...]` | Generic | Delete keys |
 | `EXISTS key [key ...]` | Generic | Check key existence |
 | `TYPE key` | Generic | Return object type (`string`, `list`, `set`) |
+| `KEYS pattern` | Generic | Find all keys matching glob pattern (e.g. `*`, `user:*`) |
 | `EXPIRE key sec` / `PEXPIRE key ms` | Expiry | Set expiration timeout |
+| `EXPIREAT key epoch_s` / `PEXPIREAT key epoch_ms` | Expiry | Set expiration at exact UNIX epoch timestamp |
 | `TTL key` / `PTTL key` | Expiry | Check remaining time-to-live |
 | `PERSIST key` | Expiry | Remove expiration timeout |
 | `FLUSHDB` | Generic | Flush active database partition |
@@ -279,14 +325,19 @@ host 0.0.0.0
 port 7379
 log_level INFO
 
-# Memory & Eviction (100MB limit)
-maxmemory 104857600
-maxmemory_policy allkeys-lru
+# Memory & Eviction (0 = unlimited, or e.g. 100MB)
+memory_limit 104857600
+eviction_strategy allkeys-lru
 
-# AOF Durability
+# Append-Only File (AOF) Durability
 aof_enabled yes
-aof_file appendonly.aof
+aof_file run_master.aof
 aof_fsync everysec
+
+# Point-in-Time Compressed Snapshot (RDB) Persistence
+# Configurable intervals: 30S (30s), 1M (1 min), 2H (2 hours), 1D (1 day), 0 to disable
+snapshot_interval 1M
+snapshot_file dump.rdb
 ```
 
 Start the server pointing to a configuration file:
@@ -296,7 +347,14 @@ Start the server pointing to a configuration file:
 
 Or override individual settings on the command line:
 ```bash
-./build/release/rundb --config config/rundb.conf --port 8000 --log-level DEBUG
+# Enable automated 1-minute compressed snapshots with custom output path
+./build/release/rundb --snapshot 1M --snapshot-file /data/dump.rdb
+
+# Run pure in-memory without AOF durability
+./build/release/rundb --no-aof
+
+# Run with snapshot every 30 seconds and AOF everysec fsync
+./build/release/rundb --snapshot 30S --aof-fsync everysec
 ```
 
 ---
@@ -309,10 +367,11 @@ RunDB Native features a comprehensive native C++20 testing framework and high-pe
 
 Run the full test suite directly or through CTest:
 ```bash
-# Direct test binary (runs 57 unit and integration tests)
+# Direct test binary (runs all 76 unit and integration tests)
 ./build/rundb_tests
 
 # Filter tests by subsystem or test name
+./build/rundb_tests --filter Snapshot
 ./build/rundb_tests --filter Evaluator
 
 # Run via CMake CTest
@@ -323,15 +382,38 @@ ctest --test-dir build --output-on-failure
 
 Run high-resolution benchmarks measuring RPS, latency percentiles (min, avg, p50, p90, p95, p99, max), and memory RSS deltas without Python interpreter overhead:
 ```bash
-# Run direct in-memory engine microbenchmarks (millions of ops/sec)
+# Run direct in-memory engine microbenchmarks (2.2M - 3.8M ops/sec)
 ./build/release/rundb_benchmark --engine -n 100000
 
-# Run high-concurrency TCP network benchmark
-./build/release/rundb_benchmark --network -c 50 -n 50000
+# Run high-concurrency TCP network benchmark (170k - 182k req/sec)
+./build/release/rundb_benchmark --network -c 20 -n 50000
 
 # Run all benchmarks
 ./build/release/rundb_benchmark
 ```
+
+#### Microbenchmark Results (Direct In-Memory Engine)
+| Command | Throughput (RPS) | Avg Latency | p50 Latency | p99 Latency |
+|:---|:---:|:---:|:---:|:---:|
+| **`PING`** | **3,527,215 req/s** | < 0.001 ms | < 0.001 ms | < 0.001 ms |
+| **`SET`** | **2,257,463 req/s** | < 0.001 ms | < 0.001 ms | 0.002 ms |
+| **`GET`** | **2,788,548 req/s** | < 0.001 ms | < 0.001 ms | 0.001 ms |
+| **`INCR`** | **3,881,010 req/s** | < 0.001 ms | < 0.001 ms | < 0.001 ms |
+| **`LPUSH`** | **3,500,385 req/s** | < 0.001 ms | < 0.001 ms | 0.001 ms |
+| **`LPOP`** | **3,388,018 req/s** | < 0.001 ms | < 0.001 ms | 0.001 ms |
+| **`SADD`** | **2,473,666 req/s** | < 0.001 ms | < 0.001 ms | 0.001 ms |
+| **`SISMEMBER`** | **2,317,438 req/s** | < 0.001 ms | < 0.001 ms | 0.001 ms |
+
+#### TCP Network Benchmark Results (20 Concurrent Clients, Loopback Socket)
+| Command | Throughput (RPS) | Avg Latency | p50 Latency | p99 Latency |
+|:---|:---:|:---:|:---:|:---:|
+| **`GET`** | **182,062 req/s** | 0.109 ms | 0.110 ms | 0.154 ms |
+| **`LPUSH`** | **178,387 req/s** | 0.112 ms | 0.111 ms | 0.164 ms |
+| **`SET`** | **175,581 req/s** | 0.113 ms | 0.113 ms | 0.152 ms |
+| **`SADD`** | **175,242 req/s** | 0.114 ms | 0.113 ms | 0.206 ms |
+| **`PING`** | **173,705 req/s** | 0.115 ms | 0.113 ms | 0.160 ms |
+| **`INCR`** | **170,314 req/s** | 0.117 ms | 0.117 ms | 0.156 ms |
+| **`LPOP`** | **169,377 req/s** | 0.118 ms | 0.115 ms | 0.156 ms |
 
 ---
 

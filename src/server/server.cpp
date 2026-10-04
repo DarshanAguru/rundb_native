@@ -1,6 +1,7 @@
 #include "server/server.hpp"
 #include "server/shutdown.hpp"
 #include "core/aof.hpp"
+#include "core/snapshot.hpp"
 #include "protocol/resp.hpp"
 #include "util/printer.hpp"
 #include "logger.hpp"
@@ -14,6 +15,8 @@
 #include <unistd.h>
 #include <cerrno>
 #include <cstring>
+#include <atomic>
+#include <chrono>
 
 namespace rundb::server {
 
@@ -120,13 +123,31 @@ void Server::handle_new_connection() {
         }
 
         m_clients[client_fd] = std::make_shared<Client>(client_fd);
+        static std::atomic<uint64_t> s_next_client_id{1};
+        auto& ctx = m_clients[client_fd]->context();
+        ctx.id = s_next_client_id++;
+        ctx.fd = client_fd;
+        char ip[INET_ADDRSTRLEN];
+        ::inet_ntop(AF_INET, &client_addr.sin_addr, ip, sizeof(ip));
+        ctx.addr = std::string(ip) + ":" + std::to_string(ntohs(client_addr.sin_port));
+        ctx.laddr = m_host + ":" + std::to_string(m_port);
+        auto now_s = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count());
+        ctx.created_time_s = now_s;
+        ctx.last_interaction_s = now_s;
+        m_store.register_client(&ctx);
+
         core::Stats::instance().record_connection();
     }
 }
 
 void Server::close_client(int fd) {
     ::epoll_ctl(m_epoll_fd, EPOLL_CTL_DEL, fd, nullptr);
-    m_clients.erase(fd);
+    auto it = m_clients.find(fd);
+    if (it != m_clients.end()) {
+        m_store.unregister_client(&it->second->context());
+        m_clients.erase(it);
+    }
 }
 
 void Server::handle_client_read(int fd) {
@@ -150,6 +171,10 @@ void Server::handle_client_read(int fd) {
         client->consume_read_bytes(consumed);
 
         if (!tokens.empty()) {
+            auto now_s = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count());
+            client->context().last_interaction_s = now_s;
+            client->context().last_cmd = tokens[0];
             std::string reply = m_store.process_command(client->context(), tokens);
             client->buffer_reply(reply);
         }
@@ -157,6 +182,11 @@ void Server::handle_client_read(int fd) {
 
     // Flush buffered replies produced during this read event
     client->flush_write_buffer();
+
+    if (client->context().close_requested) {
+        close_client(fd);
+        return;
+    }
 
     // Update epoll flags only if write interest state changed
     bool want_out = client->has_pending_writes();
@@ -227,6 +257,9 @@ void Server::run() {
         if (auto aof = m_store.get_aof()) {
             aof->flush_if_needed();
         }
+        if (auto snap = m_store.get_snapshot_manager()) {
+            snap->cron_tick(m_store);
+        }
     }
 
     stop();
@@ -254,6 +287,10 @@ void Server::stop() noexcept {
 
     if (auto aof = m_store.get_aof()) {
         aof->close();
+    }
+
+    if (auto snap = m_store.get_snapshot_manager()) {
+        snap->wait_for_bg_save();
     }
 
     size_t used = core::Eviction::get_used_memory();

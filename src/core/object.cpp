@@ -213,7 +213,7 @@ bool RunDBObject::set_remove(std::string_view member) {
         return false;
     }
     if (auto* hs = get_hashset()) {
-        auto it = hs->find(member);
+        auto it = hs->find(internals::SDS(member));
         if (it != hs->end()) {
             hs->erase(it);
             return true;
@@ -233,7 +233,7 @@ bool RunDBObject::set_contains(std::string_view member) const {
         return false;
     }
     if (const auto* hs = get_hashset()) {
-        return hs->find(member) != hs->end();
+        return hs->find(internals::SDS(member)) != hs->end();
     }
     return false;
 }

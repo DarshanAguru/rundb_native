@@ -19,6 +19,8 @@ Makefile
 .ninja_log
 compile_commands.json
 compile_flags.txt
+dist/
+*.snap
 
 # Object files and libraries
 *.o

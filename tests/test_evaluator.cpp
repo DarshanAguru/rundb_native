@@ -2,6 +2,7 @@
 #include "core/store.hpp"
 #include "core/evaluator.hpp"
 #include "core/client_context.hpp"
+#include "core/latency.hpp"
 #include <thread>
 #include <chrono>
 
@@ -264,3 +265,213 @@ TEST_CASE("Evaluator_ExpireAtAndPExpireAt") {
     ASSERT_FALSE(ttl_res == ":-1\r\n");
     ASSERT_FALSE(ttl_res == ":-2\r\n");
 }
+
+TEST_CASE("Evaluator_CommandCommands") {
+    Store store;
+    ClientContext ctx;
+
+    // 1. COMMAND returns all command specs
+    std::string full_specs = Evaluator::evaluate(store, ctx, {"COMMAND"});
+    ASSERT_CONTAINS(full_specs, "ping");
+    ASSERT_CONTAINS(full_specs, "set");
+    ASSERT_CONTAINS(full_specs, "get");
+
+    // 2. COMMAND COUNT returns total count of commands
+    std::string count_res = Evaluator::evaluate(store, ctx, {"COMMAND", "COUNT"});
+    ASSERT_CONTAINS(count_res, ":54\r\n");
+
+    // 3. COMMAND LIST returns command names
+    std::string list_res = Evaluator::evaluate(store, ctx, {"COMMAND", "LIST"});
+    ASSERT_CONTAINS(list_res, "ping");
+    ASSERT_CONTAINS(list_res, "echo");
+    ASSERT_CONTAINS(list_res, "config");
+    ASSERT_CONTAINS(list_res, "latency");
+
+    // 4. COMMAND INFO
+    std::string info_res = Evaluator::evaluate(store, ctx, {"COMMAND", "INFO", "SET", "GET"});
+    ASSERT_CONTAINS(info_res, "set");
+    ASSERT_CONTAINS(info_res, "get");
+
+    // 5. COMMAND DOCS
+    std::string docs_res = Evaluator::evaluate(store, ctx, {"COMMAND", "DOCS", "PING"});
+    ASSERT_CONTAINS(docs_res, "ping");
+    ASSERT_CONTAINS(docs_res, "summary");
+
+    // 6. COMMAND GETKEYS
+    std::string keys_res1 = Evaluator::evaluate(store, ctx, {"COMMAND", "GETKEYS", "SET", "foo", "bar"});
+    ASSERT_EQ(keys_res1, "*1\r\n$3\r\nfoo\r\n");
+
+    std::string keys_res2 = Evaluator::evaluate(store, ctx, {"COMMAND", "GETKEYS", "MSET", "k1", "v1", "k2", "v2"});
+    ASSERT_EQ(keys_res2, "*2\r\n$2\r\nk1\r\n$2\r\nk2\r\n");
+
+    // 7. COMMAND HELP
+    std::string help_res = Evaluator::evaluate(store, ctx, {"COMMAND", "HELP"});
+    ASSERT_CONTAINS(help_res, "COMMAND");
+    ASSERT_CONTAINS(help_res, "COUNT");
+}
+
+TEST_CASE("Evaluator_ConfigCommands") {
+    Store store(1048576, EvictionPolicy::AllKeysLRU);
+    ClientContext ctx;
+
+    // 1. CONFIG GET
+    std::string get_all = Evaluator::evaluate(store, ctx, {"CONFIG", "GET", "*"});
+    ASSERT_CONTAINS(get_all, "maxmemory");
+    ASSERT_CONTAINS(get_all, "maxmemory-policy");
+    ASSERT_CONTAINS(get_all, "1048576");
+    ASSERT_CONTAINS(get_all, "allkeys-lru");
+
+    std::string get_single = Evaluator::evaluate(store, ctx, {"CONFIG", "GET", "maxmemory"});
+    ASSERT_CONTAINS(get_single, "maxmemory");
+    ASSERT_CONTAINS(get_single, "1048576");
+
+    // 2. CONFIG SET
+    std::string set_mem = Evaluator::evaluate(store, ctx, {"CONFIG", "SET", "maxmemory", "50mb"});
+    ASSERT_EQ(set_mem, "+OK\r\n");
+    ASSERT_EQ(store.get_maxmemory(), 50ULL * 1024ULL * 1024ULL);
+
+    std::string set_pol = Evaluator::evaluate(store, ctx, {"CONFIG", "SET", "maxmemory-policy", "noeviction"});
+    ASSERT_EQ(set_pol, "+OK\r\n");
+    ASSERT_EQ(static_cast<int>(store.get_eviction_policy()), static_cast<int>(EvictionPolicy::NoEviction));
+
+    // 3. CONFIG RESETSTAT
+    std::string reset_res = Evaluator::evaluate(store, ctx, {"CONFIG", "RESETSTAT"});
+    ASSERT_EQ(reset_res, "+OK\r\n");
+
+    // 4. CONFIG REWRITE
+    std::string rewrite_res = Evaluator::evaluate(store, ctx, {"CONFIG", "REWRITE"});
+    ASSERT_EQ(rewrite_res, "+OK\r\n");
+
+    // 5. CONFIG HELP
+    std::string help_res = Evaluator::evaluate(store, ctx, {"CONFIG", "HELP"});
+    ASSERT_CONTAINS(help_res, "CONFIG");
+    ASSERT_CONTAINS(help_res, "RESETSTAT");
+}
+
+TEST_CASE("Evaluator_ClientCommands") {
+    Store store;
+    ClientContext ctx;
+    ctx.id = 42;
+    store.register_client(&ctx);
+
+    // 1. CLIENT ID
+    ASSERT_EQ(Evaluator::evaluate(store, ctx, {"CLIENT", "ID"}), ":42\r\n");
+
+    // 2. CLIENT SETNAME and GETNAME
+    ASSERT_EQ(Evaluator::evaluate(store, ctx, {"CLIENT", "GETNAME"}), "$-1\r\n");
+    ASSERT_EQ(Evaluator::evaluate(store, ctx, {"CLIENT", "SETNAME", "my_client"}), "+OK\r\n");
+    ASSERT_EQ(Evaluator::evaluate(store, ctx, {"CLIENT", "GETNAME"}), "$9\r\nmy_client\r\n");
+
+    // Invalid client name with spaces
+    ASSERT_CONTAINS(Evaluator::evaluate(store, ctx, {"CLIENT", "SETNAME", "invalid name"}), "ERR");
+
+    // 3. CLIENT SETINFO
+    ASSERT_EQ(Evaluator::evaluate(store, ctx, {"CLIENT", "SETINFO", "LIB-NAME", "redis-py"}), "+OK\r\n");
+    ASSERT_EQ(Evaluator::evaluate(store, ctx, {"CLIENT", "SETINFO", "LIB-VER", "5.0.0"}), "+OK\r\n");
+
+    // 4. CLIENT INFO
+    std::string info_res = Evaluator::evaluate(store, ctx, {"CLIENT", "INFO"});
+    ASSERT_CONTAINS(info_res, "id=42");
+    ASSERT_CONTAINS(info_res, "name=my_client");
+
+    // 5. CLIENT LIST
+    std::string list_res = Evaluator::evaluate(store, ctx, {"CLIENT", "LIST"});
+    ASSERT_CONTAINS(list_res, "id=42");
+
+    // 6. CLIENT KILL
+    ASSERT_EQ(Evaluator::evaluate(store, ctx, {"CLIENT", "KILL", "ID", "42"}), ":1\r\n");
+    ASSERT_TRUE(ctx.close_requested);
+
+    // 7. CLIENT HELP
+    std::string help_res = Evaluator::evaluate(store, ctx, {"CLIENT", "HELP"});
+    ASSERT_CONTAINS(help_res, "CLIENT");
+    ASSERT_CONTAINS(help_res, "SETNAME");
+
+    store.unregister_client(&ctx);
+}
+
+TEST_CASE("Evaluator_LatencyCommands") {
+    Store store;
+    ClientContext ctx;
+
+    // Reset before test
+    Evaluator::evaluate(store, ctx, {"LATENCY", "RESET"});
+
+    // 1. LATENCY DOCTOR with no events
+    ASSERT_CONTAINS(Evaluator::evaluate(store, ctx, {"LATENCY", "DOCTOR"}), "Dave, no latency spikes were detected!");
+
+    // 2. LATENCY LATEST with no events
+    ASSERT_EQ(Evaluator::evaluate(store, ctx, {"LATENCY", "LATEST"}), "*0\r\n");
+
+    // Record mock latency event
+    LatencyMonitor::instance().record_event("command", 15);
+    LatencyMonitor::instance().record_event("command", 30);
+
+    // 3. LATENCY LATEST with events
+    std::string latest_res = Evaluator::evaluate(store, ctx, {"LATENCY", "LATEST"});
+    ASSERT_CONTAINS(latest_res, "command");
+
+    // 4. LATENCY HISTORY
+    std::string history_res = Evaluator::evaluate(store, ctx, {"LATENCY", "HISTORY", "command"});
+    ASSERT_CONTAINS(history_res, ":30\r\n");
+
+    // 5. LATENCY GRAPH
+    std::string graph_res = Evaluator::evaluate(store, ctx, {"LATENCY", "GRAPH", "command"});
+    ASSERT_CONTAINS(graph_res, "command");
+
+    // 6. LATENCY DOCTOR with events
+    std::string doc_res = Evaluator::evaluate(store, ctx, {"LATENCY", "DOCTOR"});
+    ASSERT_CONTAINS(doc_res, "Dave");
+    ASSERT_CONTAINS(doc_res, "command");
+
+    // 7. LATENCY RESET
+    std::string reset_res = Evaluator::evaluate(store, ctx, {"LATENCY", "RESET", "command"});
+    ASSERT_CONTAINS(reset_res, ":1\r\n");
+
+    // 8. LATENCY HELP
+    std::string help_res = Evaluator::evaluate(store, ctx, {"LATENCY", "HELP"});
+    ASSERT_CONTAINS(help_res, "LATENCY");
+    ASSERT_CONTAINS(help_res, "DOCTOR");
+}
+
+TEST_CASE("Evaluator_ObjectCommands") {
+    Store store;
+    ClientContext ctx;
+
+    // 1. Non-existent key
+    ASSERT_EQ(Evaluator::evaluate(store, ctx, {"OBJECT", "ENCODING", "nokey"}), "$-1\r\n");
+
+    // 2. Integer string -> int encoding
+    Evaluator::evaluate(store, ctx, {"SET", "num", "42"});
+    ASSERT_EQ(Evaluator::evaluate(store, ctx, {"OBJECT", "ENCODING", "num"}), "$3\r\nint\r\n");
+
+    // 3. Regular string -> raw (SDS) encoding
+    Evaluator::evaluate(store, ctx, {"SET", "str", "hello_world"});
+    ASSERT_EQ(Evaluator::evaluate(store, ctx, {"OBJECT", "ENCODING", "str"}), "$3\r\nraw\r\n");
+
+    // 4. List -> quicklist encoding
+    Evaluator::evaluate(store, ctx, {"LPUSH", "mylist", "a", "b", "c"});
+    ASSERT_EQ(Evaluator::evaluate(store, ctx, {"OBJECT", "ENCODING", "mylist"}), "$9\r\nquicklist\r\n");
+
+    // 5. Integer Set -> intset encoding
+    Evaluator::evaluate(store, ctx, {"SADD", "myset", "100", "200", "300"});
+    ASSERT_EQ(Evaluator::evaluate(store, ctx, {"OBJECT", "ENCODING", "myset"}), "$6\r\nintset\r\n");
+
+    // 6. Non-integer element added -> auto-promotes to hashtable encoding
+    Evaluator::evaluate(store, ctx, {"SADD", "myset", "string_member"});
+    ASSERT_EQ(Evaluator::evaluate(store, ctx, {"OBJECT", "ENCODING", "myset"}), "$9\r\nhashtable\r\n");
+
+    // 7. OBJECT IDLETIME & REFCOUNT
+    std::string idletime_res = Evaluator::evaluate(store, ctx, {"OBJECT", "IDLETIME", "num"});
+    ASSERT_TRUE(idletime_res.rfind(":", 0) == 0); // integer response :<num>\r\n
+
+    std::string refcount_res = Evaluator::evaluate(store, ctx, {"OBJECT", "REFCOUNT", "num"});
+    ASSERT_TRUE(refcount_res.rfind(":", 0) == 0);
+
+    // 8. OBJECT HELP
+    std::string help_res = Evaluator::evaluate(store, ctx, {"OBJECT", "HELP"});
+    ASSERT_CONTAINS(help_res, "ENCODING");
+    ASSERT_CONTAINS(help_res, "IDLETIME");
+}
+
+

@@ -51,6 +51,8 @@ public:
     [[nodiscard]] bool is_enabled() const noexcept { return m_enabled; }
     void set_enabled(bool enabled) noexcept { m_enabled = enabled; }
     [[nodiscard]] const std::string& filename() const noexcept { return m_filename; }
+    [[nodiscard]] AofFsync fsync_policy() const noexcept { return m_policy; }
+    void set_fsync_policy(AofFsync policy) noexcept { m_policy = policy; }
 
 private:
     std::string m_filename;
