@@ -24,10 +24,11 @@ namespace rundb::core::internals {
  *    - Elements are stored in strictly ascending sorted order.
  *    - Binary search yields branch-predictable lookups and cache prefetching.
  *
- * 3. In-Place Promotion & Memmove Shifting:
- *    - When an inserted integer exceeds the current encoding, `upgrade_and_add()`
- *      promotes the buffer from back to front without extra heap allocation.
- *    - Insertion and deletion use raw `std::memmove` for high-speed hardware block moves.
+ * 3. Backward Upgrading & Shifting:
+ *    - When an inserted integer exceeds the current encoding width, `upgrade_and_add()`
+ *      allocates a new buffer sized for the wider encoding and migrates existing elements
+ *      from back to front (preserving index alignment), then frees the old buffer.
+ *    - Insertion within the same encoding uses `std::memmove` for high-speed hardware block moves.
  */
 class IntSet {
 public:

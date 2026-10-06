@@ -21,18 +21,20 @@
 
 **RunDB Native** is the high-performance native C++20 evolution of the [RunDB](https://github.com/DarshanAguru/runDB) distributed architecture. Designed for extreme speed, minimal memory overhead, and wire-level compatibility with standard Redis clients (`redis-cli`, Jedis, redis-py, etc.), RunDB Native implements proprietary algorithms and cache-conscious internal data structures rather than copying legacy architectures.
 
+This project was built through original coding and deep systems engineering understanding, developed with interactive assistance and pair-programming from **Gemini** via **Antigravity**.
+
 ### Key Highlights
 
 - **⚡ Blistering Performance**: Achieves **150,000+ QPS** on commodity hardware with **sub-0.2ms p50 latency**.
 - **🧠 Custom `run_alloc` Engine**: Real-time atomic memory allocation tracking with zero lock contention, bundled directly with production `jemalloc` (`libjemalloc.so`) for zero-fragmentation operation.
 - **📦 Bundled Zero-Config jemalloc**: Embedded into CMake with automatic RPATH resolution—no manual `apt-get install libjemalloc-dev` or environment tweaking required.
-- **🧬 Proprietary `SDS`**: Small String Optimization (SSO) storing strings $\le 22$ bytes directly on the stack with **zero heap allocation**, paired with an 8-byte cache-line aligned dynamic header for longer keys.
-- **🔢 Adaptive `IntSet`**: Compact contiguous sorted integer array automatically packing 16-bit, 32-bit, or 64-bit integers with branchless binary search, upgrading encodings in-place and auto-promoting to hash sets on demand.
+- **🧬 Proprietary `SDS`**: Small String Optimization (SSO) storing strings $\le 22$ bytes directly inside the 32-byte struct with **zero heap allocation**, paired with an 8-byte cache-line aligned dynamic header for longer keys.
+- **🔢 Adaptive `IntSet`**: Compact contiguous sorted integer array automatically packing 16-bit, 32-bit, or 64-bit integers with branchless binary search, migrating encodings backwards with amortized reallocations and auto-promoting to hash sets on demand.
 - **📜 Chunked `QuickList`**: Cache-conscious unrolled doubly-linked list packing 32-element contiguous chunks per node, providing $O(1)$ push/pop at both ends with hardware cache prefetching.
-- **⏰ 24-Bit Circular LRU Clock & Eviction Pool**: Approximates global LRU through a 16-candidate bounded eviction pool without pointer overhead.
+- **⏰ 24-Bit Circular LRU Clock & Eviction Pool**: Approximates global LRU through a 16-candidate bounded eviction pool that preserves the longest-idle keys across rounds with zero per-key pointer overhead.
 - **🎯 Probabilistic Active Expiration**: Evaluates 20 random keys with TTL per database partition, automatically repeating if $> 25\%$ are expired, with a strict 1ms time-budget cap to maintain sub-millisecond p99 latencies.
 - **💾 Append-Only File (AOF) Persistence**: Enabled by default (`--aof-enabled yes`, `--no-aof` to disable) with configurable fsync (`always`, `everysec`, `no`), transaction safety, and startup replay.
-- **📸 Compressed Point-in-Time Snapshots (RDB)**: High-compression Zlib DEFLATE dumps with CRC32 integrity checks. Supports asynchronous background saving (`BGSAVE`), synchronous saving (`SAVE`), and automated interval-based triggers (`--snapshot 1M`, `30S`, `2H`).
+- **📸 Compressed Point-in-Time Snapshots (RDB)**: High-compression Zlib DEFLATE dumps with CRC32 integrity checks. Single-threaded memory extraction with asynchronous background compression (`BGSAVE`), synchronous saving (`SAVE`), and automated interval triggers.
 - **🛠️ Comprehensive Admin & Introspection Suite**: Complete implementations of `COMMAND` (`DOCS`, `INFO`, `COUNT`), `CONFIG` (`GET`, `SET`, `RESETSTAT`), `CLIENT` (`LIST`, `SETNAME`, `GETNAME`, `KILL`, `ID`, `INFO`, `PAUSE`, `UNPAUSE`), and `LATENCY` (`LATEST`, `HISTORY`, `RESET`, `DOCTOR`, `GRAPH`).
 - **🐳 Hermetic Zero-Dependency Container**: Self-contained multi-stage Docker build packaging pre-bundled `jemalloc`, `zlib`, and `quill` via automated `vcpkg` bootstrapping—users never need to manually download or configure external dependencies.
 - **🎨 Interactive Terminal Printer**: Full ANSI color palette, block-font ASCII art banner, boxed network status, dynamic metric scaling (B $\to$ KB $\to$ MB $\to$ GB), and an end-of-run "memory calories burnt" summary.
@@ -98,7 +100,7 @@ Standard `glibc malloc` exhibits memory fragmentation and lacks real-time insigh
 - **Embedded jemalloc**: Routes all allocations through bundled `jemalloc` with transparent RPATH resolution.
 
 ### 2. `SDS` (Small Dynamic String)
-- **SSO ($\le 22$ bytes)**: Standard strings incur 32 bytes of struct overhead and heap allocations for keys like `"user:1"`. `SDS` stores strings up to 22 bytes in an inline 24-byte struct on the stack.
+- **SSO ($\le 22$ bytes)**: Standard strings incur 32 bytes of struct overhead plus separate heap allocations for keys like `"user:1"`. `SDS` stores strings up to 22 bytes in an inline 32-byte struct (24-byte union + 1-byte flag + 7-byte padding) with **zero heap allocation**.
 - **Dynamic Header ($> 22$ bytes)**: Prefixed with an 8-byte cache-aligned header `[uint32_t len, uint32_t alloc]` directly adjacent to character data, maximizing L1 cache line prefetching.
 - **Binary Safe**: Length is stored explicitly, permitting null bytes `\0` in keys and values.
 
@@ -107,17 +109,22 @@ Standard `glibc malloc` exhibits memory fragmentation and lacks real-time insigh
   - `ENC_INT16` (2 bytes/val) for range $[-32768, 32767]$
   - `ENC_INT32` (4 bytes/val) for range $[-2147483648, 2147483647]$
   - `ENC_INT64` (8 bytes/val) for 64-bit numbers
-- **In-Place Upgrading**: Upgrades existing elements backwards without auxiliary allocations when a wider integer is inserted. Auto-promotes to a hash set if string values are inserted or size exceeds 512.
+- **Dynamic Upgrading**: When an inserted value exceeds current limits, dynamically reallocates for the wider width and shifts elements backwards to preserve index ordering before releasing the old buffer. Auto-promotes to a hash set if string values are inserted or size exceeds 512.
 
 ### 4. `QuickList` (Chunked Unrolled Deque)
 - **Cache-Conscious Chunking**: Pure linked lists cause cache thrashing due to pointer chasing. `QuickList` groups elements into contiguous arrays of 32 elements per `Node`.
 - **$O(1)$ Boundaries**: LPUSH, RPUSH, LPOP, and RPOP operate at chunk boundaries in $O(1)$ without vector shifting.
 - **Chunk Jumping**: Random indexing (`LINDEX`) skips full chunks of 32 ($k = \text{index} / 32$), minimizing pointer traversals.
 
-### 5. Probabilistic Active Expiration
-- Checks 20 random keys with TTL per database partition on each 50ms tick.
-- If $> 25\%$ of sampled keys are expired, it resamples and purges immediately.
-- Capped to 1ms total execution time per tick to avoid blocking network I/O.
+### 5. 16-Candidate Bounded Eviction Pool & Active Expiration
+- **Why a Pool?**: Single-round random sampling is volatile. Retaining the 16 longest-idle keys across sampling rounds progressively converges to true global LRU with zero pointer overhead per key (saving 16–24 bytes per entry vs Redis's bidirectional pointers).
+- **Active Expiration**: Samples 20 random keys with TTL per partition every 50ms. If $> 25\%$ are expired, it resamples immediately, capped to 1ms to keep event loop latency sub-millisecond.
+
+### 6. Architectural Trade-offs & Notes
+- **Snapshot Extraction vs Redis `fork()`**: Redis uses OS `fork()` for copy-on-write snapshots, which requires zero upfront copy time but duplicates page tables and risks memory overcommit spikes on Linux. RunDB Native uses a portable single-threaded memory extraction phase followed by background zlib worker writes—eliminating `fork()` at the trade-off of an $O(N)$ extraction step and temporary memory replication during saves.
+- **Object Ownership & Lifetimes**: `RunDBObject` uses `std::make_shared` to fuse object data (72-byte struct) and control blocks into a single contiguous allocation, ensuring safe aliasing for in-flight operations and queries.
+- **Transactions**: Supports atomic blocks via `MULTI`, `EXEC`, and `DISCARD`. (Optimistic CAS via `WATCH` is planned for a future release).
+- **Memory Tracking**: `run_alloc` tracks direct dynamic buffers (heap SDS strings, IntSet arrays, QuickList chunks), while standard allocator nodes and keys are accounted for in process RSS metrics.
 
 ---
 
@@ -402,6 +409,14 @@ Run high-resolution benchmarks measuring RPS, latency percentiles (min, avg, p50
 Contributions are welcome! Please review [CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) before opening a pull request.
 
 Protected under the [BSD 3-Clause](LICENSE) License.
+
+---
+
+## Acknowledgements & Attribution
+
+This project is engineered through personal coding, low-level systems design, and deep architectural understanding of databases and memory systems, developed with interactive pair-programming assistance from **Google Gemini** through the **Antigravity** agentic development platform.
+
+---
 
 **Author**: **Darshan Aguru**
 - 📧 Email: agurudf@gmail.com

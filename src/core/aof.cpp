@@ -16,6 +16,14 @@ static uint64_t get_time_ms() noexcept {
     );
 }
 
+static uint64_t get_wall_time_ms() noexcept {
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()
+        ).count()
+    );
+}
+
 AOF::AOF(std::string filename, AofFsync fsync_policy)
     : m_filename(std::move(filename)), m_policy(fsync_policy) {}
 
@@ -161,7 +169,7 @@ bool AOF::dump_all(Store& store) {
         return true;
     };
 
-    auto now_ms = get_time_ms();
+    auto now_wall_ms = get_wall_time_ms();
 
     for (auto& db : store.databases()) {
         if (db.key_count() == 0) continue;
@@ -205,7 +213,7 @@ bool AOF::dump_all(Store& store) {
             // Expiry preservation
             int64_t ttl_ms = db.get_ttl_ms(key);
             if (ttl_ms > 0) {
-                uint64_t expire_at_sec = (now_ms + ttl_ms + 999) / 1000;
+                uint64_t expire_at_sec = (now_wall_ms + static_cast<uint64_t>(ttl_ms) + 999) / 1000;
                 write_cmd({"EXPIREAT", key, std::to_string(expire_at_sec)});
             }
         }

@@ -17,7 +17,7 @@ namespace rundb::core::internals {
 class Hashers {
 public:
     // 64-bit MurmurHash3
-    [[nodiscard]] static constexpr uint64_t murmur3_64(std::string_view key, uint64_t seed = 0x5bd1e995) noexcept {
+    [[nodiscard]] static inline uint64_t murmur3_64(std::string_view key, uint64_t seed = 0x5bd1e995) noexcept {
         const uint64_t m = 0xc6a4a7935bd1e995ULL;
         const int r = 47;
         uint64_t h = seed ^ (key.size() * m);

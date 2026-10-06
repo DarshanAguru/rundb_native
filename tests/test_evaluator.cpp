@@ -398,7 +398,7 @@ TEST_CASE("Evaluator_LatencyCommands") {
     Evaluator::evaluate(store, ctx, {"LATENCY", "RESET"});
 
     // 1. LATENCY DOCTOR with no events
-    ASSERT_CONTAINS(Evaluator::evaluate(store, ctx, {"LATENCY", "DOCTOR"}), "Dave, no latency spikes were detected!");
+    ASSERT_CONTAINS(Evaluator::evaluate(store, ctx, {"LATENCY", "DOCTOR"}), "No latency spikes were detected!");
 
     // 2. LATENCY LATEST with no events
     ASSERT_EQ(Evaluator::evaluate(store, ctx, {"LATENCY", "LATEST"}), "*0\r\n");
@@ -421,7 +421,7 @@ TEST_CASE("Evaluator_LatencyCommands") {
 
     // 6. LATENCY DOCTOR with events
     std::string doc_res = Evaluator::evaluate(store, ctx, {"LATENCY", "DOCTOR"});
-    ASSERT_CONTAINS(doc_res, "Dave");
+    ASSERT_CONTAINS(doc_res, "The following latency events were analyzed:");
     ASSERT_CONTAINS(doc_res, "command");
 
     // 7. LATENCY RESET

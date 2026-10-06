@@ -25,10 +25,12 @@ struct EvictCandidate {
  * DESIGN & WHY IT WORKS:
  * 1. Bounded Memory & O(1) Overhead:
  *    - Maintains a fixed-size pool of 16 candidates sorted by idle time.
- * 2. Approximated Global LRU:
- *    - Instead of maintaining a full doubly-linked list of millions of keys
- *      (which costs 16 to 24 bytes of pointers per key!), RunDB samples random
- *      keys into this candidate pool on demand.
+ * 2. Why a Pool? Approximated Global LRU:
+ *    - Pure sampling alone in a single eviction round is noisy and volatile.
+ *    - By retaining the top 16 best (longest idle) candidates across consecutive rounds,
+ *      the pool progressively converges to true global LRU.
+ *    - Avoids maintaining a global doubly-linked list across millions of keys,
+ *      eliminating 16 to 24 bytes of pointer overhead per dictionary entry.
  * 3. 24-Bit Circular Clock Resolution:
  *    - Accurately tracks idle time across circular counter wrap-arounds.
  */

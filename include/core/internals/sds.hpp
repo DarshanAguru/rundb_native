@@ -16,7 +16,8 @@ namespace rundb::core::internals {
  * DESIGN & WHY IT WORKS:
  * 1. Small String Optimization (SSO):
  *    - Strings up to 22 bytes are stored completely in-place inside the object
- *      (24 bytes total size: 1 byte flags + 22 bytes data + 1 byte null terminator).
+ *      (32 bytes total struct size: 24-byte union [1 byte len + 22 bytes data + 1 byte null terminator]
+ *      + 1 byte flags, padded to 8-byte alignment).
  *    - This completely eliminates heap allocations for common Redis keys, command names,
  *      and short string values (IDs, counters, status codes, small tokens).
  *

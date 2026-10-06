@@ -30,11 +30,30 @@ ssize_t Client::read_from_socket() {
     }
 
     char stack_buf[16384];
-    ssize_t bytes = ::recv(m_fd, stack_buf, sizeof(stack_buf), 0);
-    if (bytes > 0) {
-        m_read_buf.append(stack_buf, static_cast<size_t>(bytes));
+    ssize_t total_bytes = 0;
+    while (true) {
+        ssize_t bytes = ::recv(m_fd, stack_buf, sizeof(stack_buf), 0);
+        if (bytes > 0) {
+            m_read_buf.append(stack_buf, static_cast<size_t>(bytes));
+            total_bytes += bytes;
+        } else if (bytes == 0) {
+            // Client closed connection cleanly
+            if (total_bytes == 0) return 0;
+            break;
+        } else {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                // All available data drained from kernel socket buffer
+                break;
+            }
+            if (errno == EINTR) {
+                continue;
+            }
+            // Unexpected socket error
+            if (total_bytes == 0) return -1;
+            break;
+        }
     }
-    return bytes;
+    return total_bytes > 0 ? total_bytes : (errno == EAGAIN || errno == EWOULDBLOCK ? -1 : 0);
 }
 
 ssize_t Client::flush_write_buffer() {

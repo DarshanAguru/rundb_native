@@ -44,7 +44,8 @@ enum class ObjectEncoding : uint8_t {
  * 3. Proprietary Internals:
  *    - Lists use `QuickList` (chunked unrolled doubly linked list)
  *    - Integer Sets use `IntSet` (adaptive binary-search array, 16/32/64 bit)
- *    - General Sets use `std::unordered_set<std::string>`
+ *    - General Sets use `std::unordered_set<internals::SDS>`
+ *    Total object size is 72 bytes (8-byte header & alignment padding + 64-byte variant).
  */
 class RunDBObject {
 public:
