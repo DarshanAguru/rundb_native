@@ -36,7 +36,7 @@ This project was built through original coding and deep systems engineering unde
 - **💾 Append-Only File (AOF) Persistence**: Enabled by default (`--aof-enabled yes`, `--no-aof` to disable) with configurable fsync (`always`, `everysec`, `no`), transaction safety, and startup replay.
 - **📸 Compressed Point-in-Time Snapshots (RDB)**: High-compression Zlib DEFLATE dumps with CRC32 integrity checks. Single-threaded memory extraction with asynchronous background compression (`BGSAVE`), synchronous saving (`SAVE`), and automated interval triggers.
 - **🛠️ Comprehensive Admin & Introspection Suite**: Complete implementations of `COMMAND` (`DOCS`, `INFO`, `COUNT`), `CONFIG` (`GET`, `SET`, `RESETSTAT`), `CLIENT` (`LIST`, `SETNAME`, `GETNAME`, `KILL`, `ID`, `INFO`, `PAUSE`, `UNPAUSE`), and `LATENCY` (`LATEST`, `HISTORY`, `RESET`, `DOCTOR`, `GRAPH`).
-- **🐳 Hermetic Zero-Dependency Container**: Self-contained multi-stage Docker build packaging pre-bundled `jemalloc`, `zlib`, and `quill` via automated `vcpkg` bootstrapping—users never need to manually download or configure external dependencies.
+- **🐳 Zero-Dependency Container**: Self-contained multi-stage Docker build packaging pre-bundled `jemalloc`, `zlib`, and `quill` via automated `vcpkg` bootstrapping—users never need to manually download or configure external dependencies.
 - **🎨 Interactive Terminal Printer**: Full ANSI color palette, block-font ASCII art banner, boxed network status, dynamic metric scaling (B $\to$ KB $\to$ MB $\to$ GB), and an end-of-run "memory calories burnt" summary.
 
 ---
